@@ -28,10 +28,6 @@
 
 #define TXN_MARKER "txn.pending"
 
-/* om-managed named UCI sections (mode B) */
-#define OM_BAT_IF  "om_bat"	/* proto batadv soft interface */
-#define OM_MESH_IF "om_mesh"	/* proto batadv_hardif carrier */
-
 static int copy_file(const char *from, const char *to)
 {
 	FILE *in = fopen(from, "rb");

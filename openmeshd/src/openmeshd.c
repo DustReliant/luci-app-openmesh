@@ -31,6 +31,7 @@
 #include "ubus_api.h"
 #include "session_net.h"
 #include "netconf.h"
+#include "monitor.h"
 
 #define OM_VERSION       "0.0.1"
 #define OM_STATE_DIR     "/etc/openmesh"
@@ -50,6 +51,7 @@ static struct om_disc disc;
 static struct om_ubus ubus_ctx;
 static struct om_snet snet;
 static struct om_netconf netconf;
+static struct om_monitor mon;
 static struct uloop_timeout heartbeat_timer;
 static struct uloop_timeout tick_timer;
 static struct uloop_fd disc_fd;
@@ -114,6 +116,7 @@ static void tick_cb(struct uloop_timeout *t)
 				  strerror(errno));
 		next_announce = now + base * 4 / 5 +
 			randombytes_uniform(base * 2 / 5 + 1);
+		om_monitor_poll(&mon);	/* same cadence as announces */
 	}
 	om_disc_tick(&disc, now);
 	uloop_timeout_set(t, OM_TICK_MS);
@@ -259,6 +262,7 @@ int main(int argc, char **argv)
 			ULOG_WARN("ubus unavailable, running without RPC\n");
 		om_ubus_set_snet(&ubus_ctx, &snet);
 		om_ubus_set_netconf(&ubus_ctx, &netconf, opt_statedir);
+		om_ubus_set_monitor(&ubus_ctx, &mon);
 	}
 
 	om_netconf_recover(&netconf, opt_statedir);

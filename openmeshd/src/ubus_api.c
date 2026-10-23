@@ -18,6 +18,7 @@
 #include "session_net.h"
 #include "netconf.h"
 #include "store.h"
+#include "monitor.h"
 
 
 static struct blob_buf b;
@@ -322,6 +323,43 @@ static int om_apply_rollback(struct ubus_context *ctx, struct ubus_object *obj,
 	return ubus_send_reply(ctx, req, b.head);
 }
 
+static int om_get_links(struct ubus_context *ctx, struct ubus_object *obj,
+			struct ubus_request_data *req, const char *method,
+			struct blob_attr *msg)
+{
+	struct om_ubus *u = OM_HANDLER_CTX(obj);
+	void *a;
+
+	(void)method;
+	(void)msg;
+	blob_buf_init(&b, 0);
+	a = blobmsg_open_array(&b, "links");
+	if (u->mon)
+		for (unsigned i = 0; i < u->mon->n_links; i++) {
+			const struct om_link *l = &u->mon->links[i];
+			void *t = blobmsg_open_table(&b, NULL);
+
+			blobmsg_add_string(&b, "type",
+				l->type == OM_LINK_WIFI ? "wifi" :
+				l->type == OM_LINK_BATMAN ? "batman" :
+				"wired");
+			if (l->ifname[0])
+				blobmsg_add_string(&b, "ifname", l->ifname);
+			blobmsg_add_string(&b, "peer", l->peer);
+			if (l->rssi)
+				blobmsg_add_u32(&b, "rssi",
+						(uint32_t)l->rssi);
+			if (l->tx_rate)
+				blobmsg_add_u32(&b, "rate_kbps",
+						l->tx_rate);
+			if (l->via[0])
+				blobmsg_add_string(&b, "via", l->via);
+			blobmsg_close_table(&b, t);
+		}
+	blobmsg_close_array(&b, a);
+	return ubus_send_reply(ctx, req, b.head);
+}
+
 static const struct ubus_method om_methods[] = {
 	UBUS_METHOD_NOARG("status", om_status),
 	UBUS_METHOD_NOARG("list_nodes", om_list_nodes),
@@ -334,6 +372,7 @@ static const struct ubus_method om_methods[] = {
 	UBUS_METHOD_NOARG("mesh_join", om_mesh_join),
 	UBUS_METHOD_NOARG("apply_confirm", om_apply_confirm),
 	UBUS_METHOD_NOARG("apply_rollback", om_apply_rollback),
+	UBUS_METHOD_NOARG("get_links", om_get_links),
 };
 
 static struct ubus_object_type om_obj_type =
@@ -383,6 +422,11 @@ void om_ubus_set_netconf(struct om_ubus *u, struct om_netconf *nc,
 {
 	u->netconf = nc;
 	snprintf(u->state_dir, sizeof(u->state_dir), "%s", state_dir);
+}
+
+void om_ubus_set_monitor(struct om_ubus *u, struct om_monitor *m)
+{
+	u->mon = m;
 }
 
 void om_ubus_notify_node_new(struct om_ubus *u, const struct om_node_info *n)

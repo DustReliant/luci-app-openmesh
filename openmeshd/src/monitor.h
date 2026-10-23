@@ -1,0 +1,40 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+#ifndef OPENMESH_MONITOR_H
+#define OPENMESH_MONITOR_H
+
+#include <stddef.h>
+#include <stdint.h>
+#include <time.h>
+
+#define OM_MAX_LINKS 16
+
+enum om_link_type {
+	OM_LINK_WIFI = 0,	/* 802.11s peer station */
+	OM_LINK_BATMAN,		/* batman-adv originator route */
+	OM_LINK_WIRED,		/* fdb-derived wired neighbour (V0.3) */
+};
+
+struct om_link {
+	uint8_t type;
+	char ifname[16];
+	char peer[20];		/* MAC (colon format) */
+	int8_t rssi;		/* dBm, 0 = unknown */
+	uint32_t tx_rate;	/* kbit/s, 0 = unknown */
+	char via[16];		/* batman hardif */
+	time_t seen;
+};
+
+struct om_monitor {
+	struct om_link links[OM_MAX_LINKS];
+	unsigned n_links;
+	time_t last_poll;
+};
+
+/*
+ * Refresh the link table from iwinfo (mesh peers) and batctl
+ * (originators). Safe to call when no mesh/batman exists: yields an
+ * empty table. Target-only (shells out to iwinfo/batctl).
+ */
+void om_monitor_poll(struct om_monitor *m);
+
+#endif /* OPENMESH_MONITOR_H */
