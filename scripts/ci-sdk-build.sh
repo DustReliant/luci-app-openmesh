@@ -22,7 +22,12 @@ master)
 	BASE=$DL/snapshots
 	;;
 *)
-	LATEST=$(curl -sfL "$DL/releases/" \
+	# the downloads.openwrt.org releases/ index 502s from runner IPs;
+	# prefer GitHub tags (openwrt mirrors every release tag there)
+	LATEST=$(git ls-remote --tags --refs \
+		https://github.com/openwrt/openwrt.git "v$VER.*" 2>/dev/null \
+		| awk -F/ '{print $NF}' | sed 's/^v//' | sort -uV | tail -1)
+	[ -n "$LATEST" ] || LATEST=$(curl -sfL "$DL/releases/" 2>/dev/null \
 		| grep -oE "$VER\.[0-9]+" | sort -uV | tail -1)
 	[ -n "$LATEST" ] || { echo "error: no $VER release found" >&2; exit 1; }
 	BASE=$DL/releases/$LATEST
