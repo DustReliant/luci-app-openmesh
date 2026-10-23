@@ -78,6 +78,12 @@ void om_disc_tick(struct om_disc *d, time_t now);
 size_t om_disc_build_packet(const struct om_disc *d, uint8_t *out,
 			    size_t outlen, uint64_t ts);
 
+struct om_disc;
+
+/* minimal flat JSON scanner: "key":"value" (no escapes); 0 / -1 */
+int om_json_get_str(const char *body, size_t len, const char *key,
+		    char *out, size_t outsz);
+
 /*
  * Validate and absorb one packet. Returns 0 if accepted (new or refresh),
  * -1 for any rejection. Exposed for unit tests.

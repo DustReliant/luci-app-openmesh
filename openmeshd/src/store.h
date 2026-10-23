@@ -29,4 +29,10 @@ int om_store_remove(const uint8_t id[32]);
 int om_store_foreach(int (*cb)(const struct om_stored_node *n, void *priv),
 		     void *priv);
 
+/* Mesh backhaul parameters (named section "backhaul"). */
+int om_store_backhaul_set(const char *mesh_id, const char *mesh_key,
+			  const char *band);
+int om_store_backhaul_get(char *mesh_id, size_t id_sz, char *mesh_key,
+			  size_t key_sz, char *band, size_t band_sz);
+
 #endif /* OPENMESH_STORE_H */

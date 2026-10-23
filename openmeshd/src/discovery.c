@@ -49,8 +49,8 @@ static uint64_t get_u64be(const uint8_t *p)
 }
 
 /* minimal flat JSON scanner: "key":"value", no escapes */
-static int json_get_str(const char *body, size_t len, const char *key,
-			char *out, size_t outsz)
+int om_json_get_str(const char *body, size_t len, const char *key,
+		    char *out, size_t outsz)
 {
 	char pat[24];
 	int n = snprintf(pat, sizeof(pat), "\"%s\":\"", key);
@@ -192,11 +192,11 @@ int om_disc_handle_packet(struct om_disc *d, const uint8_t *buf, size_t len,
 		return -1;
 
 	/* strict: role is mandatory; model/fw optional */
-	if (json_get_str(body, body_max, "role", role, sizeof(role)) < 0)
+	if (om_json_get_str(body, body_max, "role", role, sizeof(role)) < 0)
 		return -1;
-	if (json_get_str(body, body_max, "model", model, sizeof(model)) < 0)
+	if (om_json_get_str(body, body_max, "model", model, sizeof(model)) < 0)
 		snprintf(model, sizeof(model), "unknown");
-	if (json_get_str(body, body_max, "fw", fw, sizeof(fw)) < 0)
+	if (om_json_get_str(body, body_max, "fw", fw, sizeof(fw)) < 0)
 		snprintf(fw, sizeof(fw), "unknown");
 
 	/* commit */

@@ -5,6 +5,9 @@
 #include <stdbool.h>
 #include <time.h>
 
+struct om_snet;
+struct om_netconf;
+
 #include <libubox/uloop.h>
 
 #include "identity.h"
@@ -96,9 +99,20 @@ int om_snet_init(struct om_snet *s, const struct om_snet_cfg *cfg,
 		 struct om_identity *id);
 void om_snet_done(struct om_snet *s);
 
+/* Agent-side config transaction hook (mesh push target). */
+void om_snet_set_netconf(struct om_snet *s, struct om_netconf *nc,
+			 const char *state_dir);
+
+/* Controller: push mesh config to all established peers. */
+void om_snet_push_mesh(struct om_snet *s, const char *mesh_id,
+		       const char *band, const char *key);
+
 /* Controller: queue a discovered node for adoption (user action). */
 int om_snet_adopt(struct om_snet *s, const uint8_t id[OM_ID_LEN],
 		  const char *name);
+
+/* Controller: drop an adopted node (removes persistence, closes link). */
+int om_snet_revoke(struct om_snet *s, const uint8_t id[OM_ID_LEN]);
 
 bool om_snet_is_adopted(struct om_snet *s, const uint8_t id[OM_ID_LEN]);
 

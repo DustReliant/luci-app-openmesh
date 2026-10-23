@@ -25,10 +25,16 @@
 
 #include "session_net.h"
 #include "store.h"
+#include "netconf.h"
+#include "discovery.h"
 
 #define OM_HS_TIMEOUT 10	/* seconds per handshake step */
 #define OM_KA_PERIOD  15
 #define OM_KA_DEAD    45
+
+/* agent-side config transaction hook (set via om_snet_set_netconf) */
+static struct om_netconf *agent_netconf;
+static char agent_state_dir[OM_PATH_MAX];
 
 static void peer_close(struct om_snet_peer *p);
 static void agent_connect(struct om_snet *s);
@@ -457,6 +463,12 @@ static void agent_rx_cb(struct uloop_fd *fd, unsigned int events)
 		p->rx_counter++;
 		p->last_rx = time(NULL);
 
+		/* agent: received traffic proves the mesh config did not
+		 * cut the controller link -> confirm pending txn */
+		if (agent_netconf && agent_netconf->active &&
+		    p->state == PS_ESTABLISHED)
+			om_netconf_confirm(agent_netconf);
+
 		if (p->state == PS_HELLO && t == OM_SES_GRANT) {
 			char path[OM_PATH_MAX];
 			char hex[OM_ID_HEX_LEN];
@@ -524,6 +536,24 @@ static void agent_rx_cb(struct uloop_fd *fd, unsigned int events)
 					++p->tx_counter, OM_SES_KA, NULL, 0);
 			if (n)
 				peer_send_frame(p, out, n);
+			return;
+		}
+		if (t == OM_SES_CONFIG && agent_netconf) {
+			char mesh_id[33], band[8], key[33];
+
+			if (om_json_get_str((const char *)pt, ptlen,
+					    "mesh_id", mesh_id,
+					    sizeof(mesh_id)) == 0 &&
+			    om_json_get_str((const char *)pt, ptlen, "band",
+					    band, sizeof(band)) == 0 &&
+			    om_json_get_str((const char *)pt, ptlen, "key",
+					    key, sizeof(key)) == 0) {
+				ULOG_NOTE("session: mesh config received, "
+					  "applying\n");
+				om_netconf_mesh_apply(agent_netconf,
+						      agent_state_dir,
+						      mesh_id, band, key);
+			}
 			return;
 		}
 		return;
@@ -603,6 +633,39 @@ static void agent_connect(struct om_snet *s)
 }
 
 /* ---------- shared ---------- */
+
+void om_snet_set_netconf(struct om_snet *s, struct om_netconf *nc,
+			 const char *state_dir)
+{
+	agent_netconf = nc;
+	snprintf(agent_state_dir, sizeof(agent_state_dir), "%s", state_dir);
+	(void)s;
+}
+
+void om_snet_push_mesh(struct om_snet *s, const char *mesh_id,
+		       const char *band, const char *key)
+{
+	char json[192];
+	uint8_t out[OM_SES_MAX_FRAME];
+	size_t n;
+	int len = snprintf(json, sizeof(json),
+			   "{\"mesh_id\":\"%s\",\"band\":\"%s\",\"key\":\"%s\"}",
+			   mesh_id, band, key);
+
+	if (len <= 0 || (size_t)len >= sizeof(json))
+		return;
+	for (unsigned i = 0; i < OM_SNET_MAX_PEERS; i++) {
+		struct om_snet_peer *p = &s->peers[i];
+
+		if (p->fd <= 0 || p->state != PS_ESTABLISHED)
+			continue;
+		n = om_ses_seal(out, sizeof(out), p->k_c2a, ++p->tx_counter,
+				OM_SES_CONFIG, (const uint8_t *)json,
+				(size_t)len + 1);
+		if (n)
+			peer_send_frame(p, out, n);
+	}
+}
 
 static void peer_send_frame(struct om_snet_peer *p, const uint8_t *f,
 			    size_t len)
@@ -745,6 +808,24 @@ int om_snet_adopt(struct om_snet *s, const uint8_t id[OM_ID_LEN],
 		 sizeof(s->pending[s->n_pending].name), "%s",
 		 (name && *name) ? name : "");
 	s->n_pending++;
+	return 0;
+}
+
+int om_snet_revoke(struct om_snet *s, const uint8_t id[OM_ID_LEN])
+{
+	struct om_adopted_node *a = adopted_find(s, id);
+	unsigned idx;
+
+	if (!a)
+		return -1;
+	for (unsigned i = 0; i < OM_SNET_MAX_PEERS; i++)
+		if (s->peers[i].fd > 0 &&
+		    !memcmp(s->peers[i].agent_id, id, OM_ID_LEN))
+			peer_close(&s->peers[i]);
+	idx = (unsigned)(a - s->adopted);
+	memmove(a, a + 1, (s->n_adopted - idx - 1) * sizeof(*a));
+	s->n_adopted--;
+	om_store_remove(id);
 	return 0;
 }
 

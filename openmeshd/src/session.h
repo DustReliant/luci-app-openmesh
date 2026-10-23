@@ -24,7 +24,8 @@ enum om_ses_type {
 	OM_SES_WELCOME = 5,	/* enc: empty */
 	OM_SES_ACK = 6,		/* enc: empty */
 	OM_SES_KA = 7,		/* enc: empty */
-	OM_SES_STATS = 8,	/* enc: model/fw heartbeat report (V0.1 minimal) */
+	OM_SES_STATS = 8,	/* reserved */
+	OM_SES_CONFIG = 9,	/* enc: JSON {"mesh_id":"..","band":"..","key":".."} */
 };
 
 struct om_ses_frame {
