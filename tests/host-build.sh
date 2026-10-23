@@ -11,6 +11,7 @@ set -eu
 
 REPO=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 BUILD=$REPO/tests/.build
+SRC=$REPO/openmeshd/src
 SODIUM_VER=1.0.19
 CFLAGS_extra=""
 LDLIBS_extra="-lsodium"
@@ -42,11 +43,31 @@ if [ ! -f /usr/include/sodium.h ]; then
 	LDLIBS_extra="$BUILD/sodium/lib/libsodium.a"
 fi
 
-# shellcheck disable=SC2086
-cc $CFLAGS_extra -I"$REPO/openmeshd/src" -Wall -Wextra -std=c11 \
-	-o "$BUILD/test_identity" \
-	"$REPO/tests/test_identity.c" \
-	"$REPO/openmeshd/src/identity.c" \
-	$LDLIBS_extra
+# test_discovery needs a helper to look nodes up by hex id
+cat > "$BUILD/find_node_hex.h" <<'EOF'
+#include <string.h>
+static const struct om_node_info *find_node_hex(struct om_disc *d, const char *hex)
+{
+	for (unsigned i = 0; i < d->n_nodes; i++) {
+		char h[OM_ID_HEX_LEN];
+		om_id_to_hex(d->nodes[i].id, h);
+		if (strcmp(h, hex) == 0)
+			return &d->nodes[i];
+	}
+	return NULL;
+}
+EOF
 
+# shellcheck disable=SC2086
+cc $CFLAGS_extra -I"$SRC" -I"$BUILD" -Wall -Wextra -std=c11 \
+	-o "$BUILD/test_identity" \
+	"$REPO/tests/test_identity.c" "$SRC/identity.c" \
+	$LDLIBS_extra
 "$BUILD/test_identity"
+
+# shellcheck disable=SC2086
+cc $CFLAGS_extra -I"$SRC" -I"$BUILD" -Wall -Wextra -std=c11 \
+	-o "$BUILD/test_discovery" \
+	"$REPO/tests/test_discovery.c" "$SRC/identity.c" "$SRC/discovery.c" \
+	$LDLIBS_extra
+"$BUILD/test_discovery"
