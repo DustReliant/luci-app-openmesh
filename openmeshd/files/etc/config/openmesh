@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# OpenMesh Manager default configuration.
+# Schema reference: docs/architecture.md section 9.
+
+config openmesh 'main'
+	option enabled '1'
+	option role 'auto'
+	option mesh_name 'openmesh'
+	option announce_interval '10'
+	option session_port '7688'
+	option announce_port '7689'
