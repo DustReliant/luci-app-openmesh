@@ -8,6 +8,7 @@
 var callStatus  = rpc.declare({ object: 'openmesh', method: 'status' });
 var callAdopted = rpc.declare({ object: 'openmesh', method: 'list_adopted' });
 var callPending = rpc.declare({ object: 'openmesh', method: 'list_pending' });
+var callLinks   = rpc.declare({ object: 'openmesh', method: 'get_links' });
 
 return view.extend({
 	draw: function(st, adopted, pending) {
@@ -73,6 +74,38 @@ return view.extend({
 		]);
 	},
 
+	renderLinks: function(links) {
+		var rows = (links.links || []).map(function(l) {
+			return E('tr', { 'class': 'tr' }, [
+				E('td', { 'class': 'td' }, l.type),
+				E('td', { 'class': 'td' }, l.ifname || l.via || '-'),
+				E('td', { 'class': 'td' }, l.peer),
+				E('td', { 'class': 'td' },
+				  l.rssi ? '%d dBm'.format(l.rssi) : '-'),
+				E('td', { 'class': 'td' },
+				  l.rate_kbps ? '%d kbit/s'.format(l.rate_kbps) : '-')
+			]);
+		});
+
+		return E('div', { 'class': 'cbi-section' }, [
+			E('h3', {}, _('Backhaul links')),
+			E('table', { 'class': 'table' }, [
+				E('tr', { 'class': 'tr table-titles' }, [
+					E('th', { 'class': 'th' }, _('Type')),
+					E('th', { 'class': 'th' }, _('Interface')),
+					E('th', { 'class': 'th' }, _('Peer')),
+					E('th', { 'class': 'th' }, _('RSSI')),
+					E('th', { 'class': 'th' }, _('Rate'))
+				]),
+				rows.length ? rows :
+					E('tr', { 'class': 'tr placeholder' }, [
+						E('td', { 'class': 'td center', colspan: 5 },
+						  _('No mesh links (single node or not deployed)'))
+					])
+			])
+		]);
+	},
+
 	load: function() {
 		return Promise.all([
 			L.resolveDefault(callStatus(), {}),
@@ -89,10 +122,12 @@ return view.extend({
 			return Promise.all([
 				L.resolveDefault(callStatus(), {}),
 				L.resolveDefault(callAdopted(), { nodes: [] }),
-				L.resolveDefault(callPending(), { nodes: [] })
+				L.resolveDefault(callPending(), { nodes: [] }),
+				L.resolveDefault(callLinks(), { links: [] })
 			]).then(function(d) {
 				container.innerHTML = '';
 				container.appendChild(self.draw(d[0], d[1], d[2]));
+				container.appendChild(self.renderLinks(d[3]));
 			});
 		}
 

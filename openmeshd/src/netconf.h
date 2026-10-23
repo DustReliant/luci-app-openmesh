@@ -11,6 +11,10 @@
 
 #define OM_TXN_TIMEOUT 30	/* seconds to confirm or auto-rollback */
 
+/* om-managed named UCI sections (mode B); keep in sync with netconf.c */
+#define OM_BAT_IF  "om_bat"	/* proto batadv soft interface */
+#define OM_MESH_IF "om_mesh"	/* proto batadv_hardif carrier */
+
 /* backhaul modes (ADR-0002) */
 #define OM_BH_WIFI   0		/* mode A: 802.11s bridged to lan */
 #define OM_BH_HYBRID 1		/* mode B: 802.11s + wired under batman-adv */
