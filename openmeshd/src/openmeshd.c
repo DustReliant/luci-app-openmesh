@@ -28,6 +28,7 @@
 #include "identity.h"
 #include "discovery.h"
 #include "config.h"
+#include "ubus_api.h"
 
 #define OM_VERSION       "0.0.1"
 #define OM_STATE_DIR     "/etc/openmesh"
@@ -42,6 +43,7 @@ static int opt_dest_port;
 
 static struct om_identity identity;
 static struct om_disc disc;
+static struct om_ubus ubus_ctx;
 static struct uloop_timeout heartbeat_timer;
 static struct uloop_timeout tick_timer;
 static struct uloop_fd disc_fd;
@@ -52,9 +54,12 @@ static void log_new_node(struct om_disc *d, const struct om_node_info *n,
 {
 	char hex[OM_ID_HEX_LEN];
 
+	(void)d;
+	(void)priv;
 	om_id_to_hex(n->id, hex);
 	ULOG_NOTE("discovery: new node %.16s.. role=%s model=%s fw=%s from %s\n",
 		  hex, n->role, n->model, n->fw, n->addr);
+	om_ubus_notify_node_new(&ubus_ctx, n);
 }
 
 static void heartbeat_cb(struct uloop_timeout *t)
@@ -160,6 +165,11 @@ int main(int argc, char **argv)
 	disc.on_new = log_new_node;
 
 	uloop_init();
+
+	if (om_ubus_init(&ubus_ctx, &identity, &disc) < 0)
+		ULOG_WARN("ubus unavailable (ubusd down or object taken), "
+			  "running without RPC\n");
+
 	heartbeat_timer.cb = heartbeat_cb;
 	uloop_timeout_set(&heartbeat_timer, 1000);
 	tick_timer.cb = tick_cb;
@@ -180,6 +190,7 @@ int main(int argc, char **argv)
 	uloop_run();
 
 	uloop_done();
+	om_ubus_done(&ubus_ctx);
 	om_disc_free(&disc);
 
 	ULOG_NOTE("openmeshd %s stopped\n", OM_VERSION);

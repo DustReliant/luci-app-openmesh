@@ -3,7 +3,7 @@
 		"description": "Grant access to OpenMesh Manager",
 		"read": {
 			"ubus": {
-				"openmesh": [ "status", "health" ]
+				"openmesh": [ "status", "health", "list_nodes" ]
 			},
 			"uci": [ "openmesh" ]
 		},
