@@ -65,8 +65,9 @@ sed -i \
 	-e 's#https://git.openwrt.org/feed/telephony.git#https://github.com/openwrt/telephony.git#' \
 	feeds.conf.default
 
-./scripts/feeds update -a
-./scripts/feeds install -a
+# large feed clones occasionally fail on CI runners - retry once
+./scripts/feeds update -a || ./scripts/feeds update -a
+./scripts/feeds install -a || ./scripts/feeds install -a
 
 ln -s "$REPO/openmeshd" package/openmeshd
 ln -s "$REPO/luci-app-openmesh" package/luci-app-openmesh
