@@ -35,3 +35,4 @@
 
 - [m0-build-skeleton.md](m0-build-skeleton.md) — M0 仓库与构建骨架（已交付，含实现期踩坑记录）
 - [m1-identity.md](m1-identity.md) — M1 身份与密钥模块（已交付，Ed25519 身份 + 28 项单测 + 真机演练）
+- [m2-discovery.md](m2-discovery.md) — M2 发现协议 v1（已交付，签名 announce + 五道校验闸 + 212 项单测 + 真机 loopback）
