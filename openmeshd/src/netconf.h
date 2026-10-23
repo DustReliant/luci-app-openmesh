@@ -11,27 +11,34 @@
 
 #define OM_TXN_TIMEOUT 30	/* seconds to confirm or auto-rollback */
 
+/* backhaul modes (ADR-0002) */
+#define OM_BH_WIFI   0		/* mode A: 802.11s bridged to lan */
+#define OM_BH_HYBRID 1		/* mode B: 802.11s + wired under batman-adv */
+
 struct om_netconf {
 	bool active;
 	bool committed;
 	uint32_t generation;
-	char bak_file[OM_PATH_MAX];
 	char marker[OM_PATH_MAX];
+	char bak_files[2][OM_PATH_MAX];
+	char dest_files[2][OM_PATH_MAX];
+	int n_files;
 	struct uloop_timeout timer;
 	void (*on_done)(bool committed, uint32_t generation, void *priv);
 	void *priv;
 };
 
 /*
- * One-shot transaction: snapshot /etc/config/wireless, add an
- * om-managed 802.11s interface (mode mesh, sae) on the chosen band,
- * commit and reload. If om_netconf_confirm() is not called within
- * OM_TXN_TIMEOUT seconds, everything is restored.
- * band: "5g" | "2g" | "auto". Returns 0 / -1.
+ * One-shot transaction: snapshot the affected /etc/config files, create
+ * the om-managed 802.11s interface (mode A) or full batman-adv transport
+ * (mode B), commit and reload. Without om_netconf_confirm() within
+ * OM_TXN_TIMEOUT seconds everything is restored.
+ * band: "5g" | "2g" | "auto". mode: OM_BH_WIFI | OM_BH_HYBRID.
+ * Returns 0 / -1.
  */
 int om_netconf_mesh_apply(struct om_netconf *nc, const char *state_dir,
 			  const char *mesh_id, const char *band,
-			  const char *sae_key);
+			  const char *sae_key, int mode);
 
 /* Keep the just-applied configuration. Returns 0 / -1. */
 int om_netconf_confirm(struct om_netconf *nc);

@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=openmeshd
 PKG_VERSION:=0.0.1
-PKG_RELEASE:=9
+PKG_RELEASE:=11
 PKG_LICENSE:=GPL-3.0-or-later
 PKG_MAINTAINER:=DustReliant <https://github.com/DustReliant>
 

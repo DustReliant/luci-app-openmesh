@@ -19,6 +19,7 @@
 #include "netconf.h"
 #include "store.h"
 
+
 static struct blob_buf b;
 
 static const struct blobmsg_policy om_adopt_policy[2] = {
@@ -26,10 +27,11 @@ static const struct blobmsg_policy om_adopt_policy[2] = {
 	{ "id", BLOBMSG_TYPE_STRING },
 };
 
-static const struct blobmsg_policy om_mesh_policy[3] = {
+static const struct blobmsg_policy om_mesh_policy[4] = {
 	{ "mesh_name", BLOBMSG_TYPE_STRING },
 	{ "band", BLOBMSG_TYPE_STRING },
 	{ "key", BLOBMSG_TYPE_STRING },
+	{ "mode", BLOBMSG_TYPE_STRING },
 };
 
 static void node_to_blob(const struct om_node_info *n)
@@ -231,29 +233,33 @@ static int om_mesh_create(struct ubus_context *ctx, struct ubus_object *obj,
 			  struct blob_attr *msg)
 {
 	struct om_ubus *u = OM_HANDLER_CTX(obj);
-	struct blob_attr *tb[3] = { NULL, NULL, NULL };
-	const char *name, *band, *key;
-	char gen[17];
+	struct blob_attr *tb[4] = { NULL, NULL, NULL, NULL };
+	const char *name, *band, *key, *mode;
+	int bh_mode = OM_BH_WIFI;
+	char gen[13];
 
 	(void)method;
 	if (!u->snet || !u->netconf)
 		return UBUS_STATUS_NOT_FOUND;
-	blobmsg_parse(om_mesh_policy, 3, tb, blob_data(msg), blob_len(msg));
+	blobmsg_parse(om_mesh_policy, 4, tb, blob_data(msg), blob_len(msg));
 	name = tb[0] ? blobmsg_get_string(tb[0]) : NULL;
 	band = tb[1] ? blobmsg_get_string(tb[1]) : "5g";
 	key = tb[2] ? blobmsg_get_string(tb[2]) : "";
+	mode = tb[3] ? blobmsg_get_string(tb[3]) : "wifi";
 	if (!name || !*name)
 		return UBUS_STATUS_INVALID_ARGUMENT;
+	if (!strcmp(mode, "hybrid"))
+		bh_mode = OM_BH_HYBRID;
 	if (!*key) {
 		gen_key(gen);
 		key = gen;
 	}
 	if (om_store_backhaul_set(name, key, band) < 0)
 		ULOG_WARN("mesh_create: persisting backhaul failed\n");
-	if (om_netconf_mesh_apply(u->netconf, u->state_dir, name, band,
-				  key) < 0)
+	if (om_netconf_mesh_apply(u->netconf, u->state_dir, name, band, key,
+				  bh_mode) < 0)
 		return UBUS_STATUS_UNKNOWN_ERROR;
-	om_snet_push_mesh(u->snet, name, band, key);
+	om_snet_push_mesh(u->snet, name, band, key, mode);
 
 	blob_buf_init(&b, 0);
 	blobmsg_add_string(&b, "result", "applied");
@@ -278,7 +284,8 @@ static int om_mesh_join(struct ubus_context *ctx, struct ubus_object *obj,
 	    !*mesh_id)
 		return UBUS_STATUS_NOT_FOUND;
 	if (om_netconf_mesh_apply(u->netconf, u->state_dir, mesh_id,
-				  *band ? band : "5g", key) < 0)
+				  *band ? band : "5g", key,
+				  OM_BH_WIFI) < 0)
 		return UBUS_STATUS_UNKNOWN_ERROR;
 	blob_buf_init(&b, 0);
 	blobmsg_add_string(&b, "result", "applied");
