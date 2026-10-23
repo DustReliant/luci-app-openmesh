@@ -49,8 +49,11 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ipk-${{ matrix.ver }}-${{ matrix.target }}
+          # artifact names must not contain '/' (from x86/64 etc.)
+          name: ipk-${{ matrix.ver }}-${{ replace(matrix.target, '/', '-') }}
           path: |
-            /tmp/sdk/bin/packages/**/openmeshd_*.ipk
-            /tmp/sdk/bin/packages/**/luci-app-openmesh-*.ipk
+            /tmp/sdk/bin/packages/**/openmeshd*.ipk
+            /tmp/sdk/bin/packages/**/luci-app-openmesh*.ipk
+            /tmp/sdk/bin/packages/**/openmeshd*.apk
+            /tmp/sdk/bin/packages/**/luci-app-openmesh*.apk
           if-no-files-found: warn
