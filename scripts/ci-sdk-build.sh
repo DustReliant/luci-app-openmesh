@@ -65,9 +65,20 @@ sed -i \
 	-e 's#https://git.openwrt.org/feed/telephony.git#https://github.com/openwrt/telephony.git#' \
 	feeds.conf.default
 
-# large feed clones occasionally fail on CI runners - retry once
+# large feed clones can partially fail with exit 0 on runners; verify
+feeds_complete() {
+	[ -d package/feeds/packages/libsodium ] || return 1
+	[ -d package/feeds/base/libubox ] || return 1
+	[ -d package/feeds/luci/luci-base ] || return 1
+	return 0
+}
 ./scripts/feeds update -a || ./scripts/feeds update -a
 ./scripts/feeds install -a || ./scripts/feeds install -a
+feeds_complete || {
+	echo "feeds incomplete, retrying both steps" >&2
+	./scripts/feeds update -a && ./scripts/feeds install -a
+}
+feeds_complete || { echo "error: feeds still incomplete" >&2; exit 1; }
 
 ln -s "$REPO/openmeshd" package/openmeshd
 ln -s "$REPO/luci-app-openmesh" package/luci-app-openmesh
