@@ -32,6 +32,13 @@ esac
 SDK_FILE=$(curl -sfL "$BASE/targets/$TARGET/" \
 	| grep -oE 'openwrt-sdk-[^"]*Linux-x86_64\.tar\.(xz|zst)' \
 	| sort -uV | tail -1)
+if [ -z "$SDK_FILE" ]; then
+	# downloads.openwrt.org directory indexes intermittently 502;
+	# the sha256sums file is served fine and lists every artifact
+	SDK_FILE=$(curl -sfL "$BASE/targets/$TARGET/sha256sums" \
+		| grep -oE 'openwrt-sdk-[^ ]*Linux-x86_64\.tar\.(xz|zst)' \
+		| sort -uV | tail -1)
+fi
 [ -n "$SDK_FILE" ] || {
 	echo "error: SDK not found under $BASE/targets/$TARGET/" >&2
 	exit 1
