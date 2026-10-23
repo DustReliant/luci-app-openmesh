@@ -37,6 +37,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Sanitize target for artifact name
+        id: slug
+        run: echo "slug=$(echo '${{ matrix.target }}' | tr / -)" >> "$GITHUB_OUTPUT"
+
       - name: Install host prerequisites
         run: |
           sudo apt-get update
@@ -50,7 +54,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           # artifact names must not contain '/' (from x86/64 etc.)
-          name: ipk-${{ matrix.ver }}-${{ replace(matrix.target, '/', '-') }}
+          name: ipk-${{ matrix.ver }}-${{ steps.slug.outputs.slug }}
           path: |
             /tmp/sdk/bin/packages/**/openmeshd*.ipk
             /tmp/sdk/bin/packages/**/luci-app-openmesh*.ipk
