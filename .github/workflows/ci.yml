@@ -13,6 +13,18 @@ on:
   workflow_dispatch:
 
 jobs:
+  host-unit:
+    runs-on: ubuntu-latest
+    name: Host unit tests
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libsodium-dev
+      - name: Build and run unit tests
+        run: ./tests/host-build.sh
+
   sdk-build:
     runs-on: ubuntu-latest
     strategy:
