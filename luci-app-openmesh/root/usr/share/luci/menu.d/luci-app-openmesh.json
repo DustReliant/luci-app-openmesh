@@ -20,5 +20,16 @@
 		"depends": {
 			"acl": [ "luci-app-openmesh" ]
 		}
+	},
+	"admin/network/openmesh/topology": {
+		"title": "拓扑",
+		"order": 20,
+		"action": {
+			"type": "view",
+			"path": "openmesh/topology"
+		},
+		"depends": {
+			"acl": [ "luci-app-openmesh" ]
+		}
 	}
 }

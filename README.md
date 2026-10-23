@@ -2,7 +2,20 @@
 
 > OpenWrt Mesh 编排与管理系统 —— 让多台 OpenWrt 路由器像商业 Mesh 产品一样简单易用。
 >
-> **当前状态：阶段 00（架构与工作流设计），尚无可安装产物。**
+> **当前状态：V0.1 已发布（管理面闭环 + 原生 802.11s 建网，tag `v0.1`）。**
+
+## V0.1 功能
+
+- ✅ 节点自动发现（UDP 签名广播，Ed25519 防伪造/防重放）
+- ✅ 节点授权领养（加密会话通道：X25519 ECDH + ChaCha20-Poly1305）
+- ✅ 已领养节点持久化（UCI）与重启恢复
+- ✅ LuCI 界面：节点表 / 待领养 / 拓扑图 / Mesh 创建向导
+- ✅ 一键创建/加入 802.11s Mesh（原生 UCI 配置，SAE 加密）
+- ✅ 配置事务安全网：30 秒不确认自动回滚（含掉电恢复）
+
+后端 ubus 对象 `openmesh`（status / list_nodes / list_pending / list_adopted / adopt / revoke / mesh_create / mesh_join / apply_confirm / apply_rollback / health）+ 事件（node.new / node.adopted / config.applied / config.rolledback）。
+
+测试基线：宿主机 275 项断言 + 真机（Xiaomi AX3000T / MT7981）E2E（领养/持久化/回滚/11s 接口全绿）+ CI 三版本（23.05/24.10/master）× 双架构矩阵。
 
 ## 项目定位
 
