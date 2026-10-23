@@ -47,7 +47,14 @@ jobs:
           sudo apt-get install -y --no-install-recommends zstd binutils
 
       - name: Build in SDK
-        run: ./scripts/ci-sdk-build.sh "${{ matrix.ver }}" "${{ matrix.target }}" "$GITHUB_WORKSPACE"
+        run: |
+          set -o pipefail
+          ./scripts/ci-sdk-build.sh "${{ matrix.ver }}" "${{ matrix.target }}" "$GITHUB_WORKSPACE" 2>&1 | tee /tmp/cibuild.log
+
+      - name: Diagnose failure
+        if: failure()
+        run: |
+          echo "::error::BUILD TAIL: $(tail -c 700 /tmp/cibuild.log | tr '\n' '|' | tr -d '\r')"
 
       - name: Upload ipks
         if: always()
