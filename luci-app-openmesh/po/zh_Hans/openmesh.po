@@ -1,0 +1,161 @@
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "OpenMesh Manager"
+msgstr "OpenMesh 管理器"
+
+msgid "Controller"
+msgstr "控制器"
+
+msgid "Node ID"
+msgstr "节点 ID"
+
+msgid "Role"
+msgstr "角色"
+
+msgid "Version"
+msgstr "版本"
+
+msgid "Nodes"
+msgstr "节点数"
+
+msgid "Discovered nodes (not yet adopted)"
+msgstr "已发现的节点（未领养）"
+
+msgid "Model"
+msgstr "型号"
+
+msgid "Source"
+msgstr "来源"
+
+msgid "Action"
+msgstr "操作"
+
+msgid "Name for this node"
+msgstr "为该节点命名"
+
+msgid "Adopt"
+msgstr "领养"
+
+msgid "Mesh nodes"
+msgstr "Mesh 节点"
+
+msgid "Name"
+msgstr "名称"
+
+msgid "Status"
+msgstr "状态"
+
+msgid "Actions"
+msgstr "操作"
+
+msgid "New name"
+msgstr "新名称"
+
+msgid "Rename"
+msgstr "改名"
+
+msgid "Remove this node from the mesh?"
+msgstr "确定将该节点从 Mesh 中移除？"
+
+msgid "Remove"
+msgstr "移除"
+
+msgid "Online"
+msgstr "在线"
+
+msgid "Offline"
+msgstr "离线"
+
+msgid "No nodes adopted yet"
+msgstr "尚未领养任何节点"
+
+msgid "Loading…"
+msgstr "加载中…"
+
+msgid "Create mesh network"
+msgstr "创建 Mesh 网络"
+
+msgid "Mesh name"
+msgstr "Mesh 名称"
+
+msgid "Backhaul band"
+msgstr "回程频段"
+
+msgid "Backhaul mode"
+msgstr "回程模式"
+
+msgid "Wireless only (802.11s)"
+msgstr "仅无线（802.11s）"
+
+msgid "Hybrid (+batman-adv)"
+msgstr "混合（batman-adv）"
+
+msgid "SAE key (blank = generate)"
+msgstr "SAE 密钥（留空自动生成）"
+
+msgid "Create mesh (30s auto-rollback)"
+msgstr "创建 Mesh（30 秒自动回滚）"
+
+msgid "Mesh applied. Key: %s - confirming in %d s"
+msgstr "Mesh 已应用。密钥：%s — %d 秒后自动确认"
+
+msgid "Keep configuration"
+msgstr "保留配置"
+
+msgid "Configuration kept."
+msgstr "配置已保留。"
+
+msgid "No pending transaction."
+msgstr "当前没有待确认的事务。"
+
+msgid "Roll back now"
+msgstr "立即回滚"
+
+msgid "Rolled back."
+msgstr "已回滚。"
+
+msgid "Mesh topology"
+msgstr "Mesh 拓扑"
+
+msgid "online"
+msgstr "在线"
+
+msgid "offline"
+msgstr "离线"
+
+msgid "Solid: adopted (green online / red offline); dashed: discovered, not adopted."
+msgstr "实线：已领养（绿 = 在线 / 红 = 离线）；虚线：已发现、未领养。"
+
+msgid "Backhaul links"
+msgstr "回程链路"
+
+msgid "Type"
+msgstr "类型"
+
+msgid "Interface"
+msgstr "接口"
+
+msgid "Peer"
+msgstr "对端"
+
+msgid "RSSI"
+msgstr "RSSI"
+
+msgid "Rate"
+msgstr "速率"
+
+msgid "No mesh links (single node or not deployed)"
+msgstr "暂无 Mesh 链路（单节点或未部署）"
+
+msgid "%d dBm"
+msgstr "%d dBm"
+
+msgid "%d kbit/s"
+msgstr "%d kbit/s"
+
+msgid "Mesh Wizard"
+msgstr "Mesh 向导"
+
+msgid "Topology"
+msgstr "拓扑"

@@ -86,7 +86,10 @@ feeds_complete || {
 feeds_complete || { echo "error: feeds still incomplete" >&2; exit 1; }
 
 ln -s "$REPO/openmeshd" package/openmeshd
-ln -s "$REPO/luci-app-openmesh" package/luci-app-openmesh
+# luci app is copied, not symlinked: luci.mk's po discovery relies on
+# make $(wildcard) which does not traverse symlinked package dirs
+rm -rf package/luci-app-openmesh
+cp -a "$REPO/luci-app-openmesh" package/luci-app-openmesh
 
 printf 'CONFIG_PACKAGE_openmeshd=y\nCONFIG_PACKAGE_luci-app-openmesh=y\n' >> .config
 make defconfig

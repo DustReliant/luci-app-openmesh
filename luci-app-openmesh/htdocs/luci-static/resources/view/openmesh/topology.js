@@ -81,9 +81,9 @@ return view.extend({
 				E('td', { 'class': 'td' }, l.ifname || l.via || '-'),
 				E('td', { 'class': 'td' }, l.peer),
 				E('td', { 'class': 'td' },
-				  l.rssi ? '%d dBm'.format(l.rssi) : '-'),
+				  l.rssi ? _('%d dBm').format(l.rssi) : '-'),
 				E('td', { 'class': 'td' },
-				  l.rate_kbps ? '%d kbit/s'.format(l.rate_kbps) : '-')
+				  l.rate_kbps ? _('%d kbit/s').format(l.rate_kbps) : '-')
 			]);
 		});
 

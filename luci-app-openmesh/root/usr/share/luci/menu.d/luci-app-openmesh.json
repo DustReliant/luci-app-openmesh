@@ -11,7 +11,7 @@
 		}
 	},
 	"admin/network/openmesh/wizard": {
-		"title": "Mesh 向导",
+		"title": "Mesh Wizard",
 		"order": 10,
 		"action": {
 			"type": "view",
@@ -22,7 +22,7 @@
 		}
 	},
 	"admin/network/openmesh/topology": {
-		"title": "拓扑",
+		"title": "Topology",
 		"order": 20,
 		"action": {
 			"type": "view",
