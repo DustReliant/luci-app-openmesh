@@ -33,4 +33,4 @@
 
 ## 已有文档
 
-（暂无——M0 开工时创建 `m0-build-skeleton.md`）
+- [m0-build-skeleton.md](m0-build-skeleton.md) — M0 仓库与构建骨架（已交付，含实现期踩坑记录）
