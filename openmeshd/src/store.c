@@ -234,3 +234,83 @@ int om_store_foreach(int (*cb)(const struct om_stored_node *n, void *priv),
 	ctx_close(c);
 	return count;
 }
+
+int om_store_backhaul_set(const char *mesh_id, const char *mesh_key,
+			  const char *band)
+{
+	struct uci_context *c = uci_alloc_context();
+	struct uci_package *p = NULL;
+	struct uci_section *s = NULL;
+	struct uci_element *e;
+	struct uci_ptr ptr;
+	int rc = -1;
+
+	if (!c)
+		return -1;
+	if (uci_load(c, OM_UCI_PKG, &p) != UCI_OK)
+		goto out;
+	uci_foreach_element(&p->sections, e) {
+		struct uci_section *t = uci_to_section(e);
+
+		if (!strcmp(t->type, "backhaul")) {
+			s = t;
+			break;
+		}
+	}
+	if (!s) {
+		uci_add_section(c, p, "backhaul", &s);
+		if (!s)
+			goto out;
+	}
+	memset(&ptr, 0, sizeof(ptr));
+	ptr.package = OM_UCI_PKG;
+	ptr.p = p;
+	ptr.s = s;
+	ptr.section = s->e.name;
+
+	ptr.option = "mesh_id";	ptr.value = mesh_id;	uci_set(c, &ptr);
+	ptr.option = "mesh_key";	ptr.value = mesh_key;	uci_set(c, &ptr);
+	ptr.option = "band";		ptr.value = band;	uci_set(c, &ptr);
+
+	uci_save(c, p);
+	if (uci_commit(c, &p, false) == UCI_OK)
+		rc = 0;
+out:
+	uci_free_context(c);
+	return rc;
+}
+
+int om_store_backhaul_get(char *mesh_id, size_t id_sz, char *mesh_key,
+			  size_t key_sz, char *band, size_t band_sz)
+{
+	struct uci_context *c = uci_alloc_context();
+	struct uci_package *p = NULL;
+	struct uci_element *e;
+	int found = -1;
+
+	mesh_id[0] = mesh_key[0] = band[0] = '\0';
+	if (!c)
+		return -1;
+	if (uci_load(c, OM_UCI_PKG, &p) == UCI_OK) {
+		uci_foreach_element(&p->sections, e) {
+			struct uci_section *t = uci_to_section(e);
+			struct uci_option *o;
+
+			if (strcmp(t->type, "backhaul"))
+				continue;
+			o = uci_lookup_option(c, t, "mesh_id");
+			if (o && o->type == UCI_TYPE_STRING)
+				snprintf(mesh_id, id_sz, "%s", o->v.string);
+			o = uci_lookup_option(c, t, "mesh_key");
+			if (o && o->type == UCI_TYPE_STRING)
+				snprintf(mesh_key, key_sz, "%s", o->v.string);
+			o = uci_lookup_option(c, t, "band");
+			if (o && o->type == UCI_TYPE_STRING)
+				snprintf(band, band_sz, "%s", o->v.string);
+			found = 0;
+			break;
+		}
+	}
+	uci_free_context(c);
+	return found;
+}

@@ -30,6 +30,7 @@
 #include "config.h"
 #include "ubus_api.h"
 #include "session_net.h"
+#include "netconf.h"
 
 #define OM_VERSION       "0.0.1"
 #define OM_STATE_DIR     "/etc/openmesh"
@@ -48,10 +49,19 @@ static struct om_identity identity;
 static struct om_disc disc;
 static struct om_ubus ubus_ctx;
 static struct om_snet snet;
+static struct om_netconf netconf;
 static struct uloop_timeout heartbeat_timer;
 static struct uloop_timeout tick_timer;
 static struct uloop_fd disc_fd;
 static time_t next_announce;
+
+static void on_txn_done(bool committed, uint32_t generation, void *priv)
+{
+	(void)priv;
+	ULOG_NOTE("netconf: transaction %u %s\n", generation,
+		  committed ? "committed" : "rolled back");
+	om_ubus_notify_txn(&ubus_ctx, committed);
+}
 
 static void on_adopted(struct om_snet *s, const struct om_adopted_node *n,
 		       void *priv)
@@ -248,7 +258,12 @@ int main(int argc, char **argv)
 		if (om_ubus_init(&ubus_ctx, &identity, &disc) < 0)
 			ULOG_WARN("ubus unavailable, running without RPC\n");
 		om_ubus_set_snet(&ubus_ctx, &snet);
+		om_ubus_set_netconf(&ubus_ctx, &netconf, opt_statedir);
 	}
+
+	om_netconf_recover(&netconf, opt_statedir);
+	netconf.on_done = on_txn_done;
+	om_snet_set_netconf(&snet, &netconf, opt_statedir);
 
 	heartbeat_timer.cb = heartbeat_cb;
 	uloop_timeout_set(&heartbeat_timer, 1000);

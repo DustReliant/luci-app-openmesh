@@ -9,5 +9,16 @@
 		"depends": {
 			"acl": [ "luci-app-openmesh" ]
 		}
+	},
+	"admin/network/openmesh/wizard": {
+		"title": "Mesh 向导",
+		"order": 10,
+		"action": {
+			"type": "view",
+			"path": "openmesh/wizard"
+		},
+		"depends": {
+			"acl": [ "luci-app-openmesh" ]
+		}
 	}
 }
