@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=openmeshd
 PKG_VERSION:=0.0.1
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 PKG_LICENSE:=GPL-3.0-or-later
 PKG_MAINTAINER:=DustReliant <https://github.com/DustReliant>
 
@@ -21,7 +21,7 @@ define Package/openmeshd
   SECTION:=net
   CATEGORY:=Network
   TITLE:=OpenMesh Manager daemon
-  DEPENDS:=+libubox
+  DEPENDS:=+libubox +libsodium
 endef
 
 define Package/openmeshd/description
@@ -39,7 +39,8 @@ define Build/Compile
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) \
 		-Wall -Wextra -std=c11 \
 		-o $(PKG_BUILD_DIR)/openmeshd $(PKG_BUILD_DIR)/openmeshd.c \
-		$(TARGET_LDFLAGS) -lubox
+		$(PKG_BUILD_DIR)/identity.c \
+		$(TARGET_LDFLAGS) -lubox -lsodium
 endef
 
 define Package/openmeshd/install
