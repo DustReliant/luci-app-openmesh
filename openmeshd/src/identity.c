@@ -165,3 +165,29 @@ void om_id_to_hex(const uint8_t id[OM_ID_LEN], char out[OM_ID_HEX_LEN])
 	}
 	out[OM_ID_LEN * 2] = '\0';
 }
+
+static int hexval(char c)
+{
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	if (c >= 'a' && c <= 'f')
+		return c - 'a' + 10;
+	if (c >= 'A' && c <= 'F')
+		return c - 'A' + 10;
+	return -1;
+}
+
+int om_id_from_hex(const char *hex, uint8_t out[OM_ID_LEN])
+{
+	if (strlen(hex) != OM_ID_LEN * 2)
+		return -1;
+	for (size_t i = 0; i < OM_ID_LEN; i++) {
+		int hi = hexval(hex[i * 2]);
+		int lo = hexval(hex[i * 2 + 1]);
+
+		if (hi < 0 || lo < 0)
+			return -1;
+		out[i] = (uint8_t)((hi << 4) | lo);
+	}
+	return 0;
+}

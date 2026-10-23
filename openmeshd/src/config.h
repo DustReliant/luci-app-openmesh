@@ -6,11 +6,14 @@
 
 struct om_main_cfg {
 	bool enabled;
+	bool join_open;		/* agent: accept adoption GRANT */
 	char role[16];
 	char model[48];
 	char fw[32];
+	char controller_addr[48];	/* agent: controller ip[:port] */
 	int interval;		/* announce interval, seconds */
 	int port;		/* announce/listen port */
+	int session_port;	/* controller session port (default 7688) */
 };
 
 /*

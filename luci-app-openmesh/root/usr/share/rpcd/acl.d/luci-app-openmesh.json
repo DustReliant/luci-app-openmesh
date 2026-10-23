@@ -3,10 +3,14 @@
 		"description": "Grant access to OpenMesh Manager",
 		"read": {
 			"ubus": {
-				"openmesh": [ "status", "health", "list_nodes" ]
+				"openmesh": [ "status", "health", "list_nodes", "list_pending", "list_adopted" ]
 			},
 			"uci": [ "openmesh" ]
 		},
-		"write": {}
+		"write": {
+			"ubus": {
+				"openmesh": [ "adopt" ]
+			}
+		}
 	}
 }
