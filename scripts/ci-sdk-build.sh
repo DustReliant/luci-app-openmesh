@@ -48,6 +48,16 @@ tar -xaf "$SDK_DIR/sdk.tar" -C "$SDK_DIR" --strip-components=1
 rm -f "$SDK_DIR/sdk.tar"
 cd "$SDK_DIR"
 
+# git.openwrt.org is unreliable from CI runners (and some dev networks);
+# the GitHub mirrors of the official feeds are faster and dependable.
+sed -i \
+	-e 's#https://git.openwrt.org/openwrt/openwrt.git#https://github.com/openwrt/openwrt.git#' \
+	-e 's#https://git.openwrt.org/feed/packages.git#https://github.com/openwrt/packages.git#' \
+	-e 's#https://git.openwrt.org/project/luci.git#https://github.com/openwrt/luci.git#' \
+	-e 's#https://git.openwrt.org/feed/routing.git#https://github.com/openwrt/routing.git#' \
+	-e 's#https://git.openwrt.org/feed/telephony.git#https://github.com/openwrt/telephony.git#' \
+	feeds.conf.default
+
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
