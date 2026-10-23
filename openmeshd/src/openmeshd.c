@@ -2,10 +2,9 @@
 /*
  * openmeshd - OpenMesh Manager daemon
  *
- * M0 skeleton: uloop event loop plus a periodic heartbeat log line, so the
- * toolchain, libubox linkage, procd supervision and packaging are all proven
- * before real subsystems (discovery/session/netconf/monitor/ubus_api, see
- * docs/architecture.md section 3) land from M2 onwards.
+ * M1: uloop event loop, periodic heartbeat and per-node Ed25519 identity.
+ * Subsystems still to land: discovery (M2), ubus API (M3), adoption session
+ * (M4); see docs/architecture.md section 3.
  */
 
 /* uloop.h needs struct sigaction, which strict -std=c11 hides in musl. */
@@ -21,10 +20,14 @@
 #include <libubox/uloop.h>
 #include <libubox/ulog.h>
 
+#include "identity.h"
+
 #define OM_VERSION       "0.0.1"
+#define OM_STATE_DIR     "/etc/openmesh"
 #define OM_HEARTBEAT_MS  (30 * 1000)
 
 static bool opt_debug;
+static struct om_identity identity;
 static struct uloop_timeout heartbeat_timer;
 
 static void heartbeat_cb(struct uloop_timeout *t)
@@ -40,6 +43,7 @@ static void usage(const char *prog)
 
 int main(int argc, char **argv)
 {
+	char id_hex[OM_ID_HEX_LEN];
 	int ch;
 
 	while ((ch = getopt(argc, argv, "d")) != -1) {
@@ -56,12 +60,22 @@ int main(int argc, char **argv)
 	ulog_open(ULOG_SYSLOG | (opt_debug ? ULOG_STDIO : 0),
 		  LOG_DAEMON, "openmeshd");
 
+	if (om_identity_init(&identity, OM_STATE_DIR) < 0) {
+		ULOG_ERR("identity init failed in %s "
+			 "(file corrupt? remove %s/identity to reset)\n",
+			 OM_STATE_DIR, OM_STATE_DIR);
+		return 1;
+	}
+	om_id_to_hex(identity.id, id_hex);
+
 	uloop_init();
 	heartbeat_timer.cb = heartbeat_cb;
 	uloop_timeout_set(&heartbeat_timer, 1000);
 
-	ULOG_NOTE("openmeshd %s started (M0 skeleton)%s\n",
-		  OM_VERSION, opt_debug ? " [debug]" : "");
+	ULOG_NOTE("openmeshd %s started (M1)%s\n", OM_VERSION,
+		  opt_debug ? " [debug]" : "");
+	ULOG_NOTE("identity: node_id=%s%s\n", id_hex,
+		  identity.generated ? " (new)" : "");
 
 	uloop_run();
 	uloop_done();
