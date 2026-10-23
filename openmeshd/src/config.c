@@ -46,8 +46,10 @@ int om_main_load(struct om_main_cfg *m)
 
 	memset(m, 0, sizeof(*m));
 	m->enabled = true;
+	m->join_open = false;
 	m->interval = 10;
 	m->port = OM_DISC_PORT_DEFAULT;
+	m->session_port = 7688;	/* matches docs/architecture.md section 9 */
 	snprintf(m->role, sizeof(m->role), "auto");
 
 	read_file_line("/tmp/sysinfo/model", "", m->model, sizeof(m->model),
@@ -73,6 +75,19 @@ int om_main_load(struct om_main_cfg *m)
 		if ((o = uci_lookup_option(c, s, "role")) &&
 		    o->type == UCI_TYPE_STRING)
 			snprintf(m->role, sizeof(m->role), "%s", o->v.string);
+		if ((o = uci_lookup_option(c, s, "controller_addr")) &&
+		    o->type == UCI_TYPE_STRING)
+			snprintf(m->controller_addr, sizeof(m->controller_addr),
+				 "%s", o->v.string);
+		if ((o = uci_lookup_option(c, s, "join_open")) &&
+		    o->type == UCI_TYPE_STRING) {
+			m->join_open = !strcmp(o->v.string, "1") ||
+				       !strcasecmp(o->v.string, "on") ||
+				       !strcasecmp(o->v.string, "true");
+		}
+		if ((o = uci_lookup_option(c, s, "session_port")) &&
+		    o->type == UCI_TYPE_STRING)
+			m->session_port = atoi(o->v.string);
 		if ((o = uci_lookup_option(c, s, "announce_interval")) &&
 		    o->type == UCI_TYPE_STRING)
 			m->interval = atoi(o->v.string);
@@ -88,5 +103,7 @@ int om_main_load(struct om_main_cfg *m)
 		m->interval = 60;
 	if (m->port < 1 || m->port > 65535)
 		m->port = OM_DISC_PORT_DEFAULT;
+	if (m->session_port < 1 || m->session_port > 65535)
+		m->session_port = 7688;
 	return 0;
 }

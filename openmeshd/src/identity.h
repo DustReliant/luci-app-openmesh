@@ -41,4 +41,7 @@ int om_identity_verify(const uint8_t pk[OM_PK_LEN], const uint8_t *msg,
 
 void om_id_to_hex(const uint8_t id[OM_ID_LEN], char out[OM_ID_HEX_LEN]);
 
+/* Parse a 64-char hex string; returns 0 / -1. */
+int om_id_from_hex(const char *hex, uint8_t out[OM_ID_LEN]);
+
 #endif /* OPENMESH_IDENTITY_H */

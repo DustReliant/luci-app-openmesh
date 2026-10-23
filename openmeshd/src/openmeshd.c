@@ -29,6 +29,7 @@
 #include "discovery.h"
 #include "config.h"
 #include "ubus_api.h"
+#include "session_net.h"
 
 #define OM_VERSION       "0.0.1"
 #define OM_STATE_DIR     "/etc/openmesh"
@@ -38,16 +39,39 @@
 static bool opt_debug;
 static const char *opt_statedir = OM_STATE_DIR;
 static const char *opt_dest_addr = "255.255.255.255";
+static const char *opt_ctrl_addr;
+static bool opt_join_open;
 static int opt_listen_port;
 static int opt_dest_port;
 
 static struct om_identity identity;
 static struct om_disc disc;
 static struct om_ubus ubus_ctx;
+static struct om_snet snet;
 static struct uloop_timeout heartbeat_timer;
 static struct uloop_timeout tick_timer;
 static struct uloop_fd disc_fd;
 static time_t next_announce;
+
+static void on_adopted(struct om_snet *s, const struct om_adopted_node *n,
+		       void *priv)
+{
+	char hex[OM_ID_HEX_LEN];
+
+	(void)s;
+	(void)priv;
+	om_id_to_hex(n->id, hex);
+	ULOG_NOTE("session: node adopted %.16s.. name=%s\n", hex, n->name);
+	om_ubus_notify_adopted(&ubus_ctx, n);
+}
+
+static void on_agent_state(struct om_snet *s, bool online, void *priv)
+{
+	(void)s;
+	(void)priv;
+	ULOG_NOTE("session: controller link %s\n",
+		  online ? "established" : "lost");
+}
 
 static void log_new_node(struct om_disc *d, const struct om_node_info *n,
 			 void *priv)
@@ -87,6 +111,7 @@ static void tick_cb(struct uloop_timeout *t)
 
 static void disc_fd_cb(struct uloop_fd *fd, unsigned int events)
 {
+	(void)fd;
 	if (events & ULOOP_READ)
 		om_disc_recv_ready(&disc);
 }
@@ -94,7 +119,8 @@ static void disc_fd_cb(struct uloop_fd *fd, unsigned int events)
 static void usage(const char *prog)
 {
 	fprintf(stderr,
-		"Usage: %s [-d] [-s state_dir] [-P listen_port] [-D dest_port] [-A dest_addr]\n",
+		"Usage: %s [-d] [-s state_dir] [-P listen_port] [-D dest_port]\n"
+		"          [-A dest_addr] [-c controller_ip[:port]] [-j]\n",
 		prog);
 }
 
@@ -102,10 +128,11 @@ int main(int argc, char **argv)
 {
 	struct om_main_cfg mc;
 	struct om_disc_cfg dc;
+	struct om_snet_cfg sc;
 	char id_hex[OM_ID_HEX_LEN];
 	int ch;
 
-	while ((ch = getopt(argc, argv, "ds:P:D:A:")) != -1) {
+	while ((ch = getopt(argc, argv, "ds:P:D:A:c:j")) != -1) {
 		switch (ch) {
 		case 'd':
 			opt_debug = true;
@@ -121,6 +148,12 @@ int main(int argc, char **argv)
 			break;
 		case 'A':
 			opt_dest_addr = optarg;
+			break;
+		case 'c':
+			opt_ctrl_addr = optarg;
+			break;
+		case 'j':
+			opt_join_open = true;
 			break;
 		default:
 			usage(argv[0]);
@@ -170,6 +203,50 @@ int main(int argc, char **argv)
 		ULOG_WARN("ubus unavailable (ubusd down or object taken), "
 			  "running without RPC\n");
 
+	/* role: explicit uci role wins; auto = controller unless a
+	 * controller address is configured */
+	memset(&sc, 0, sizeof(sc));
+	{
+		const char *ctrl = opt_ctrl_addr ? opt_ctrl_addr
+						 : mc.controller_addr;
+
+		if (!strcmp(mc.role, "controller"))
+			sc.is_controller = true;
+		else if (!strcmp(mc.role, "agent"))
+			sc.is_controller = false;
+		else
+			sc.is_controller = (ctrl[0] == '\0');
+
+		if (!sc.is_controller) {
+			char addr[64];
+
+			snprintf(addr, sizeof(addr), "%s", ctrl);
+			char *colon = strrchr(addr, ':');
+
+			if (colon) {
+				*colon = '\0';
+				sc.ctrl_port = atoi(colon + 1);
+			} else {
+				sc.ctrl_port = mc.session_port;
+			}
+			snprintf(sc.ctrl_addr, sizeof(sc.ctrl_addr), "%s",
+				 addr);
+		}
+		sc.listen_port = mc.session_port;
+		sc.join_open = opt_join_open || mc.join_open;
+		snprintf(sc.state_dir, sizeof(sc.state_dir), "%s",
+			 opt_statedir);
+	}
+
+	if (om_snet_init(&snet, &sc, &identity) < 0) {
+		ULOG_ERR("session init failed (port %d in use?): %s\n",
+			 sc.listen_port, strerror(errno));
+		return 1;
+	}
+	snet.on_adopted = on_adopted;
+	snet.on_agent_state = on_agent_state;
+	om_ubus_set_snet(&ubus_ctx, &snet);
+
 	heartbeat_timer.cb = heartbeat_cb;
 	uloop_timeout_set(&heartbeat_timer, 1000);
 	tick_timer.cb = tick_cb;
@@ -190,6 +267,7 @@ int main(int argc, char **argv)
 	uloop_run();
 
 	uloop_done();
+	om_snet_done(&snet);
 	om_ubus_done(&ubus_ctx);
 	om_disc_free(&disc);
 

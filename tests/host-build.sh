@@ -67,6 +67,13 @@ cc $CFLAGS_extra -I"$SRC" -I"$BUILD" -Wall -Wextra -std=c11 \
 
 # shellcheck disable=SC2086
 cc $CFLAGS_extra -I"$SRC" -I"$BUILD" -Wall -Wextra -std=c11 \
+	-o "$BUILD/test_session" \
+	"$REPO/tests/test_session.c" "$SRC/identity.c" "$SRC/session.c" \
+	$LDLIBS_extra
+"$BUILD/test_session"
+
+# shellcheck disable=SC2086
+cc $CFLAGS_extra -I"$SRC" -I"$BUILD" -Wall -Wextra -std=c11 \
 	-o "$BUILD/test_discovery" \
 	"$REPO/tests/test_discovery.c" "$SRC/identity.c" "$SRC/discovery.c" \
 	$LDLIBS_extra
