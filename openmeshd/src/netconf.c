@@ -2,8 +2,13 @@
 /*
  * openmeshd - configuration transactions with auto-rollback.
  *
- * V0.1 scope (ADR-0006): native UCI 802.11s interface management on
- * /etc/config/wireless. Snapshot -> apply -> confirm-window -> restore.
+ * Mode A (wifi): native 802.11s iface bridged into lan (ADR-0006).
+ * Mode B (hybrid): 802.11s hardif + batman-adv softif "om_bat" bridged
+ * into lan (ADR-0002). Snapshot -> apply -> confirm-window -> restore.
+ *
+ * wireless edits go through libuci; network edits (mode B, named
+ * sections only) go through idempotent uci-CLI shell calls - a V0.1
+ * simplification, one transaction at a time, no concurrent writer.
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -15,23 +20,25 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <sodium.h>
 #include <uci.h>
 
 #include <libubox/ulog.h>
 
 #include "netconf.h"
 
-#define WIRELESS_CONF "/etc/config/wireless"
-#define TXN_MARKER    "txn.pending"
+#define TXN_MARKER "txn.pending"
+
+/* om-managed named UCI sections (mode B) */
+#define OM_BAT_IF  "om_bat"	/* proto batadv soft interface */
+#define OM_MESH_IF "om_mesh"	/* proto batadv_hardif carrier */
 
 static int copy_file(const char *from, const char *to)
 {
-	FILE *in, *out;
+	FILE *in = fopen(from, "rb");
+	FILE *out;
 	char buf[4096];
 	size_t r;
 
-	in = fopen(from, "rb");
 	if (!in)
 		return -1;
 	out = fopen(to, "wb");
@@ -51,19 +58,8 @@ static int copy_file(const char *from, const char *to)
 	return 0;
 }
 
-static void marker_path(const char *state_dir, char *out, size_t outsz)
-{
-	snprintf(out, outsz, "%s/%s", state_dir, TXN_MARKER);
-}
-
-static void bak_path(const char *state_dir, char *out, size_t outsz)
-{
-	snprintf(out, outsz, "%s/wireless.om-bak", state_dir);
-}
-
 static void reload_network(void)
 {
-	/* V0.1: shell out once per transaction; fine at this cadence */
 	if (system("ubus call network reload >/dev/null 2>&1") != 0)
 		system("/sbin/wifi up >/dev/null 2>&1");
 }
@@ -91,7 +87,6 @@ static void pick_radio(const char *band, char *out, size_t outsz)
 		want = "2g";
 	else if (!strcmp(band, "5g"))
 		want = "5g";
-	/* auto: prefer 5g below */
 
 	if (uci_load(c, "wireless", &p) == UCI_OK) {
 		uci_foreach_element(&p->sections, e) {
@@ -114,18 +109,69 @@ static void pick_radio(const char *band, char *out, size_t outsz)
 	uci_free_context(c);
 }
 
+/* delete anonymous sections carrying option om_managed='1' (wireless) */
+static void drop_om_sections(struct uci_context *c, struct uci_package *p,
+			     const char *pkg)
+{
+	struct uci_element *e, *tmp;
+	struct uci_ptr ptr;
+
+	uci_foreach_element_safe(&p->sections, tmp, e) {
+		struct uci_section *s = uci_to_section(e);
+		struct uci_option *o = uci_lookup_option(c, s, "om_managed");
+
+		if (!o || o->type != UCI_TYPE_STRING ||
+		    strcmp(o->v.string, "1"))
+			continue;
+		memset(&ptr, 0, sizeof(ptr));
+		ptr.package = pkg;
+		ptr.p = p;
+		ptr.section = s->e.name;
+		uci_delete(c, &ptr);
+	}
+}
+
+/* idempotent mode B network config via uci CLI */
+static int apply_network_hybrid(void)
+{
+	const char *cmds[] = {
+		"uci -q set network." OM_BAT_IF "=interface",
+		"uci -q set network." OM_BAT_IF ".proto='batadv'",
+		"uci -q set network." OM_BAT_IF ".om_managed='1'",
+		"uci -q set network." OM_MESH_IF "=interface",
+		"uci -q set network." OM_MESH_IF ".proto='batadv_hardif'",
+		"uci -q set network." OM_MESH_IF ".master='" OM_BAT_IF "'",
+		"uci -q set network." OM_MESH_IF ".om_managed='1'",
+		/* add om_bat to br-lan ports once */
+		"BR=$(uci -q show network | sed -n "
+		"\"s/network\\.\\([^.]*\\)\\.name='br-lan'/\\1/p\"); "
+		"[ -n \"$BR\" ] && ! uci -q get network.$BR.ports | "
+		"grep -q '" OM_BAT_IF "' && "
+		"uci -q add_list network.$BR.ports='" OM_BAT_IF "'",
+		"uci -q commit network",
+		NULL
+	};
+
+	for (int i = 0; cmds[i]; i++)
+		if (system(cmds[i]) != 0) {
+			ULOG_WARN("netconf: cmd failed: %s\n", cmds[i]);
+			return -1;
+		}
+	return 0;
+}
+
 int om_netconf_mesh_apply(struct om_netconf *nc, const char *state_dir,
 			  const char *mesh_id, const char *band,
-			  const char *sae_key)
+			  const char *sae_key, int mode)
 {
-	struct uci_context *c;
-	struct uci_package *p = NULL;
-	struct uci_section *ns = NULL;
+	struct uci_context *cw = NULL;
+	struct uci_package *pw = NULL;
+	struct uci_section *ns;
 	struct uci_ptr ptr;
 	char radio[32] = "";
-	char bak[OM_PATH_MAX], marker[OM_PATH_MAX];
-	struct stat st;
+	char marker[OM_PATH_MAX];
 	static uint32_t gen = 0;
+	FILE *f;
 
 	if (nc->active)
 		return -1;	/* one transaction at a time */
@@ -138,99 +184,89 @@ int om_netconf_mesh_apply(struct om_netconf *nc, const char *state_dir,
 		return -1;
 	}
 
-	/* snapshot + on-flash pending marker (power-loss safety) */
-	bak_path(state_dir, bak, sizeof(bak));
-	marker_path(state_dir, marker, sizeof(marker));
-	if (stat(WIRELESS_CONF, &st) == 0 && copy_file(WIRELESS_CONF, bak) < 0) {
-		ULOG_ERR("netconf: snapshot failed\n");
-		return -1;
+	/* snapshots + on-flash pending marker (power-loss safety) */
+	nc->n_files = 0;
+	snprintf(nc->dest_files[nc->n_files], OM_PATH_MAX, "/etc/config/wireless");
+	snprintf(nc->bak_files[nc->n_files], OM_PATH_MAX,
+		 "%s/wireless.om-bak", state_dir);
+	nc->n_files++;
+	if (mode == OM_BH_HYBRID) {
+		snprintf(nc->dest_files[nc->n_files], OM_PATH_MAX,
+			 "/etc/config/network");
+		snprintf(nc->bak_files[nc->n_files], OM_PATH_MAX,
+			 "%s/network.om-bak", state_dir);
+		nc->n_files++;
 	}
-	gen++;
-	FILE *f = fopen(marker, "w");
-
-	if (!f) {
-		unlink(bak);
-		return -1;
-	}
-	fprintf(f, "gen=%u\nfiles=wireless\n", gen);
-	fclose(f);
-
-	c = uci_alloc_context();
-	if (!c)
-		goto fail;
-	if (uci_load(c, "wireless", &p) != UCI_OK)
-		goto fail;
-
-	/* drop previous om-managed mesh ifaces (idempotent re-create) */
-	{
-		struct uci_element *e, *tmp;
-
-		uci_foreach_element_safe(&p->sections, tmp, e) {
-			struct uci_section *s = uci_to_section(e);
-			struct uci_option *o = uci_lookup_option(c, s,
-								 "om_managed");
-
-			if (o && o->type == UCI_TYPE_STRING &&
-			    !strcmp(o->v.string, "1")) {
-				memset(&ptr, 0, sizeof(ptr));
-				ptr.package = "wireless";
-				ptr.p = p;
-				ptr.section = s->e.name;
-				uci_delete(c, &ptr);
-			}
+	for (int i = 0; i < nc->n_files; i++)
+		if (copy_file(nc->dest_files[i], nc->bak_files[i]) < 0) {
+			ULOG_ERR("netconf: snapshot of %s failed\n",
+				 nc->dest_files[i]);
+			nc->n_files = 0;
+			return -1;
 		}
-	}
 
-	uci_add_section(c, p, "wifi-iface", &ns);
+	gen++;
+	snprintf(marker, sizeof(marker), "%s/%s", state_dir, TXN_MARKER);
+	f = fopen(marker, "w");
+	if (!f)
+		goto fail;
+	fprintf(f, "gen=%u\nfiles=%d\n", gen, nc->n_files);
+	fclose(f);
+	snprintf(nc->marker, sizeof(nc->marker), "%s", marker);
+
+	/* ---- wireless (libuci) ---- */
+	cw = uci_alloc_context();
+	if (!cw || uci_load(cw, "wireless", &pw) != UCI_OK)
+		goto fail;
+	drop_om_sections(cw, pw, "wireless");
+	uci_add_section(cw, pw, "wifi-iface", &ns);
 	if (!ns)
 		goto fail;
 	memset(&ptr, 0, sizeof(ptr));
 	ptr.package = "wireless";
-	ptr.p = p;
+	ptr.p = pw;
 	ptr.s = ns;
 	ptr.section = ns->e.name;
-
-	ptr.option = "device";		ptr.value = radio;	uci_set(c, &ptr);
-	ptr.option = "mode";		ptr.value = "mesh";	uci_set(c, &ptr);
-	ptr.option = "mesh_id";		ptr.value = mesh_id;	uci_set(c, &ptr);
-	ptr.option = "network";		ptr.value = "lan";	uci_set(c, &ptr);
-	ptr.option = "encryption";	ptr.value = "sae";	uci_set(c, &ptr);
-	ptr.option = "key";		ptr.value = sae_key;	uci_set(c, &ptr);
-	ptr.option = "om_managed";	ptr.value = "1";	uci_set(c, &ptr);
-
-	uci_save(c, p);
-	if (uci_commit(c, &p, false) != UCI_OK)
+	ptr.option = "device";		ptr.value = radio;	uci_set(cw, &ptr);
+	ptr.option = "mode";		ptr.value = "mesh";	uci_set(cw, &ptr);
+	ptr.option = "mesh_id";		ptr.value = mesh_id;	uci_set(cw, &ptr);
+	ptr.option = "encryption";	ptr.value = "sae";	uci_set(cw, &ptr);
+	ptr.option = "key";		ptr.value = sae_key;	uci_set(cw, &ptr);
+	ptr.option = "om_managed";	ptr.value = "1";	uci_set(cw, &ptr);
+	ptr.option = "network";
+	ptr.value = (mode == OM_BH_HYBRID) ? OM_MESH_IF : "lan";
+	uci_set(cw, &ptr);
+	uci_save(cw, pw);
+	if (uci_commit(cw, &pw, false) != UCI_OK)
 		goto fail;
-	uci_free_context(c);
+	uci_free_context(cw);
+	cw = NULL;
+
+	/* ---- network (mode B, uci CLI) ---- */
+	if (mode == OM_BH_HYBRID && apply_network_hybrid() < 0)
+		goto fail;
 
 	reload_network();
 
 	nc->active = true;
 	nc->committed = false;
 	nc->generation = gen;
-	snprintf(nc->bak_file, sizeof(nc->bak_file), "%s", bak);
-	snprintf(nc->marker, sizeof(nc->marker), "%s", marker);
 	nc->timer.cb = txn_timer_cb;
 	uloop_timeout_set(&nc->timer, OM_TXN_TIMEOUT * 1000);
-	ULOG_NOTE("netconf: applied mesh '%s' on %s (gen %u, confirm within "
-		  "%ds)\n", mesh_id, radio, gen, OM_TXN_TIMEOUT);
+	ULOG_NOTE("netconf: applied mesh '%s' on %s mode=%s (gen %u, confirm "
+		  "within %ds)\n", mesh_id, radio,
+		  mode == OM_BH_HYBRID ? "hybrid" : "wifi", gen,
+		  OM_TXN_TIMEOUT);
 	return 0;
 
 fail:
-	if (c)
-		uci_free_context(c);
-	unlink(bak);
+	if (cw)
+		uci_free_context(cw);
+	for (int i = 0; i < nc->n_files; i++)
+		unlink(nc->bak_files[i]);
 	unlink(marker);
+	nc->n_files = 0;
 	return -1;
-}
-
-static int restore_snapshot(struct om_netconf *nc)
-{
-	if (copy_file(nc->bak_file, WIRELESS_CONF) < 0)
-		return -1;
-	unlink(nc->bak_file);
-	reload_network();
-	return 0;
 }
 
 int om_netconf_confirm(struct om_netconf *nc)
@@ -238,8 +274,9 @@ int om_netconf_confirm(struct om_netconf *nc)
 	if (!nc->active)
 		return -1;
 	uloop_timeout_cancel(&nc->timer);
+	for (int i = 0; i < nc->n_files; i++)
+		unlink(nc->bak_files[i]);
 	unlink(nc->marker);
-	unlink(nc->bak_file);
 	nc->active = false;
 	nc->committed = true;
 	ULOG_NOTE("netconf: transaction %u confirmed\n", nc->generation);
@@ -248,43 +285,85 @@ int om_netconf_confirm(struct om_netconf *nc)
 	return 0;
 }
 
+/*
+ * Belt-and-braces: after restoring snapshots, force-drop any om-managed
+ * sections that some racing writer may have re-added to the files. These
+ * sections are always ours, so deleting them is unconditionally safe.
+ */
+static void purge_om_sections(void)
+{
+	system("while uci -q show wireless 2>/dev/null | grep -q om_managed; do "
+		"uci -q delete wireless.$(uci -q show wireless | "
+		"grep om_managed | head -1 | cut -d. -f2 | cut -d= -f1); "
+		"uci -q commit wireless; done");
+	system("uci -q delete network.om_bat; uci -q delete network.om_mesh; "
+		"uci -q commit network 2>/dev/null");
+}
+
 int om_netconf_rollback(struct om_netconf *nc)
 {
 	uint32_t gen = nc->generation;
+	int rc = 0;
 
 	if (!nc->active)
 		return -1;
 	uloop_timeout_cancel(&nc->timer);
-	if (restore_snapshot(nc) < 0)
-		ULOG_ERR("netconf: rollback restore FAILED, manual check "
-			 "needed (%s)\n", WIRELESS_CONF);
+	for (int i = 0; i < nc->n_files; i++) {
+		if (copy_file(nc->bak_files[i], nc->dest_files[i]) < 0) {
+			ULOG_ERR("netconf: rollback of %s FAILED, manual "
+				 "check needed\n", nc->dest_files[i]);
+			rc = -1;
+		}
+		unlink(nc->bak_files[i]);
+	}
+	purge_om_sections();
 	unlink(nc->marker);
 	nc->active = false;
 	nc->committed = false;
-	ULOG_NOTE("netconf: transaction %u rolled back\n", gen);
+	reload_network();
+	ULOG_NOTE("netconf: transaction %u rolled back%s\n", gen,
+		  rc ? " (with errors)" : "");
 	if (nc->on_done)
 		nc->on_done(false, gen, nc->priv);
-	return 0;
+	return rc;
 }
 
 void om_netconf_recover(struct om_netconf *nc, const char *state_dir)
 {
 	char marker[OM_PATH_MAX], bak[OM_PATH_MAX];
 	struct stat st;
+	int nfiles = 1;
+	FILE *f;
 
-	marker_path(state_dir, marker, sizeof(marker));
-	bak_path(state_dir, bak, sizeof(bak));
+	snprintf(marker, sizeof(marker), "%s/%s", state_dir, TXN_MARKER);
 	if (stat(marker, &st) < 0)
 		return;		/* no pending transaction */
-	ULOG_WARN("netconf: unconfirmed transaction found at boot, "
-		  "restoring snapshot\n");
+	f = fopen(marker, "r");
+	if (f) {
+		char line[64];
+
+		while (fgets(line, sizeof(line), f))
+			if (sscanf(line, "files=%d", &nfiles) == 1)
+				break;
+		fclose(f);
+	}
+	if (nfiles < 1 || nfiles > 2)
+		nfiles = 1;
+
+	ULOG_WARN("netconf: unconfirmed transaction at boot, restoring\n");
+	snprintf(bak, sizeof(bak), "%s/wireless.om-bak", state_dir);
 	if (stat(bak, &st) == 0) {
-		if (copy_file(bak, WIRELESS_CONF) < 0)
-			ULOG_ERR("netconf: recovery restore FAILED\n");
+		copy_file(bak, "/etc/config/wireless");
 		unlink(bak);
+	}
+	if (nfiles == 2) {
+		snprintf(bak, sizeof(bak), "%s/network.om-bak", state_dir);
+		if (stat(bak, &st) == 0) {
+			copy_file(bak, "/etc/config/network");
+			unlink(bak);
+		}
 	}
 	unlink(marker);
 	nc->active = false;
-	/* reload happens when the loop starts via first announce/tick */
 	reload_network();
 }

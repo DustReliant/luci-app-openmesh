@@ -539,7 +539,8 @@ static void agent_rx_cb(struct uloop_fd *fd, unsigned int events)
 			return;
 		}
 		if (t == OM_SES_CONFIG && agent_netconf) {
-			char mesh_id[33], band[8], key[33];
+			char mesh_id[33], band[8], key[33], mode[8];
+			int bh = OM_BH_WIFI;
 
 			if (om_json_get_str((const char *)pt, ptlen,
 					    "mesh_id", mesh_id,
@@ -548,11 +549,19 @@ static void agent_rx_cb(struct uloop_fd *fd, unsigned int events)
 					    band, sizeof(band)) == 0 &&
 			    om_json_get_str((const char *)pt, ptlen, "key",
 					    key, sizeof(key)) == 0) {
+				if (om_json_get_str((const char *)pt, ptlen,
+						    "mode", mode,
+						    sizeof(mode)) == 0 &&
+				    !strcmp(mode, "hybrid"))
+					bh = OM_BH_HYBRID;
 				ULOG_NOTE("session: mesh config received, "
-					  "applying\n");
+					  "applying (mode=%s)\n",
+					  bh == OM_BH_HYBRID ? "hybrid"
+							     : "wifi");
 				om_netconf_mesh_apply(agent_netconf,
 						      agent_state_dir,
-						      mesh_id, band, key);
+						      mesh_id, band, key,
+						      bh);
 			}
 			return;
 		}
@@ -643,14 +652,15 @@ void om_snet_set_netconf(struct om_snet *s, struct om_netconf *nc,
 }
 
 void om_snet_push_mesh(struct om_snet *s, const char *mesh_id,
-		       const char *band, const char *key)
+		       const char *band, const char *key, const char *mode)
 {
-	char json[192];
+	char json[224];
 	uint8_t out[OM_SES_MAX_FRAME];
 	size_t n;
 	int len = snprintf(json, sizeof(json),
-			   "{\"mesh_id\":\"%s\",\"band\":\"%s\",\"key\":\"%s\"}",
-			   mesh_id, band, key);
+			   "{\"mesh_id\":\"%s\",\"band\":\"%s\","
+			   "\"key\":\"%s\",\"mode\":\"%s\"}",
+			   mesh_id, band, key, mode ? mode : "wifi");
 
 	if (len <= 0 || (size_t)len >= sizeof(json))
 		return;

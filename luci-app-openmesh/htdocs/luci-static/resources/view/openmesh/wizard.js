@@ -6,13 +6,13 @@
 'require ui';
 
 var callMeshCreate = rpc.declare({ object: 'openmesh', method: 'mesh_create',
-				   params: [ 'mesh_name', 'band', 'key' ] });
+				   params: [ 'mesh_name', 'band', 'key', 'mode' ] });
 var callConfirm    = rpc.declare({ object: 'openmesh', method: 'apply_confirm' });
 var callRollback   = rpc.declare({ object: 'openmesh', method: 'apply_rollback' });
 
 return view.extend({
 	render: function() {
-		var nameInput, bandSel, keyInput, statusLine;
+		var nameInput, bandSel, modeSel, keyInput, statusLine;
 
 		function setCountdown(reply) {
 			var left = reply.confirm_window || 30;
@@ -42,7 +42,8 @@ return view.extend({
 					return;
 				return callMeshCreate(nameInput.value.trim(),
 						      bandSel.value,
-						      keyInput.value || '')
+						      keyInput.value || '',
+						      modeSel.value)
 					.then(setCountdown);
 			}
 		}, _('Create mesh (30s auto-rollback)'));
@@ -95,6 +96,19 @@ return view.extend({
 						}, [
 							E('option', { 'value': '5g' }, '5 GHz'),
 							E('option', { 'value': '2g' }, '2.4 GHz')
+						]))
+				]),
+				E('div', { 'class': 'cbi-value' }, [
+					E('label', { 'class': 'cbi-value-title' },
+					  _('Backhaul mode')),
+					E('div', { 'class': 'cbi-value-field' },
+						modeSel = E('select', {
+							'class': 'cbi-input-select'
+						}, [
+							E('option', { 'value': 'wifi' },
+							  _('Wireless only (802.11s)')),
+							E('option', { 'value': 'hybrid' },
+							  _('Hybrid (+batman-adv)'))
 						]))
 				]),
 				E('div', { 'class': 'cbi-value' }, [

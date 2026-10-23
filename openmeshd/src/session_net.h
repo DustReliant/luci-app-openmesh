@@ -105,7 +105,7 @@ void om_snet_set_netconf(struct om_snet *s, struct om_netconf *nc,
 
 /* Controller: push mesh config to all established peers. */
 void om_snet_push_mesh(struct om_snet *s, const char *mesh_id,
-		       const char *band, const char *key);
+		       const char *band, const char *key, const char *mode);
 
 /* Controller: queue a discovered node for adoption (user action). */
 int om_snet_adopt(struct om_snet *s, const uint8_t id[OM_ID_LEN],
