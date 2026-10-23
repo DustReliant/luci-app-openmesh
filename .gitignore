@@ -8,3 +8,4 @@
 
 # test artifacts
 /tests/artifacts/
+/tests/.build/
