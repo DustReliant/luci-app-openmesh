@@ -1,0 +1,13 @@
+{
+	"admin/network/openmesh": {
+		"title": "OpenMesh",
+		"order": 65,
+		"action": {
+			"type": "view",
+			"path": "openmesh/overview"
+		},
+		"depends": {
+			"acl": [ "luci-app-openmesh" ]
+		}
+	}
+}

@@ -1,0 +1,10 @@
+# build artifacts
+*.o
+*.ipk
+
+# editors / os
+.*.swp
+*~
+
+# test artifacts
+/tests/artifacts/

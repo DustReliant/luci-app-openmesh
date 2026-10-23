@@ -1,0 +1,12 @@
+{
+	"luci-app-openmesh": {
+		"description": "Grant access to OpenMesh Manager",
+		"read": {
+			"ubus": {
+				"openmesh": [ "status", "health" ]
+			},
+			"uci": [ "openmesh" ]
+		},
+		"write": {}
+	}
+}
