@@ -70,7 +70,10 @@ struct om_snet {
 	struct om_snet_peer peers[OM_SNET_MAX_PEERS];
 	struct om_adopted_node adopted[OM_SNET_MAX_PEERS];
 	unsigned n_adopted;
-	uint8_t pending[OM_SNET_MAX_PENDING][OM_ID_LEN];
+	struct {
+		uint8_t id[OM_ID_LEN];
+		char name[24];
+	} pending[OM_SNET_MAX_PENDING];
 	int n_pending;
 	uint8_t network_key[32];
 	bool have_network_key;

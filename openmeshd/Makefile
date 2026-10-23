@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=openmeshd
 PKG_VERSION:=0.0.1
-PKG_RELEASE:=6
+PKG_RELEASE:=7
 PKG_LICENSE:=GPL-3.0-or-later
 PKG_MAINTAINER:=DustReliant <https://github.com/DustReliant>
 
@@ -45,6 +45,7 @@ define Build/Compile
 		$(PKG_BUILD_DIR)/ubus_api.c \
 		$(PKG_BUILD_DIR)/session.c \
 		$(PKG_BUILD_DIR)/session_net.c \
+		$(PKG_BUILD_DIR)/store.c \
 		$(TARGET_LDFLAGS) -lubox -lubus -lblobmsg_json -lsodium -luci
 endef
 

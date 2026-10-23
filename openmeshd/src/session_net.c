@@ -24,6 +24,7 @@
 #include <libubox/ulog.h>
 
 #include "session_net.h"
+#include "store.h"
 
 #define OM_HS_TIMEOUT 10	/* seconds per handshake step */
 #define OM_KA_PERIOD  15
@@ -70,17 +71,25 @@ static struct om_adopted_node *adopted_find(struct om_snet *s,
 static bool pending_has(struct om_snet *s, const uint8_t id[OM_ID_LEN])
 {
 	for (int i = 0; i < s->n_pending; i++)
-		if (!memcmp(s->pending[i], id, OM_ID_LEN))
+		if (!memcmp(s->pending[i].id, id, OM_ID_LEN))
 			return true;
 	return false;
+}
+
+static const char *pending_name(struct om_snet *s, const uint8_t id[OM_ID_LEN])
+{
+	for (int i = 0; i < s->n_pending; i++)
+		if (!memcmp(s->pending[i].id, id, OM_ID_LEN))
+			return s->pending[i].name;
+	return NULL;
 }
 
 static void pending_del(struct om_snet *s, const uint8_t id[OM_ID_LEN])
 {
 	for (int i = 0; i < s->n_pending; i++) {
-		if (!memcmp(s->pending[i], id, OM_ID_LEN)) {
-			memmove(s->pending[i], s->pending[i + 1],
-				(s->n_pending - i - 1) * OM_ID_LEN);
+		if (!memcmp(s->pending[i].id, id, OM_ID_LEN)) {
+			memmove(&s->pending[i], &s->pending[i + 1],
+				(s->n_pending - i - 1) * sizeof(s->pending[0]));
 			s->n_pending--;
 			return;
 		}
@@ -244,7 +253,19 @@ static void ctrl_handle_frame(struct om_snet *s, struct om_snet_peer *p,
 		memset(a, 0, sizeof(*a));
 		memcpy(a->id, p->agent_id, OM_ID_LEN);
 		memcpy(a->pk, p->agent_pk, OM_PK_LEN);
-		snprintf(a->name, sizeof(a->name), "node-%u", s->n_adopted);
+		{
+			const char *pname = pending_name(s, p->agent_id);
+
+			if (pname && *pname)
+				snprintf(a->name, sizeof(a->name), "%s",
+					 pname);
+			else
+				snprintf(a->name, sizeof(a->name), "node-%u",
+					 s->n_adopted);
+		}
+		if (om_store_adopted(a->id, a->pk, a->name) < 0)
+			ULOG_WARN("store: persisting adopted node failed "
+				  "(memory-only until next adopt)\n");
 		pending_del(s, p->agent_id);
 		{
 			uint8_t pl[64];
@@ -626,6 +647,21 @@ static void peer_close(struct om_snet_peer *p)
 
 /* ---------- api ---------- */
 
+static int load_adopted_cb(const struct om_stored_node *n, void *priv)
+{
+	struct om_snet *s = priv;
+	struct om_adopted_node *a;
+
+	if (s->n_adopted >= OM_SNET_MAX_PEERS)
+		return 1;
+	a = &s->adopted[s->n_adopted++];
+	memset(a, 0, sizeof(*a));
+	memcpy(a->id, n->id, OM_ID_LEN);
+	memcpy(a->pk, n->pk, OM_PK_LEN);
+	snprintf(a->name, sizeof(a->name), "%s", n->name);
+	return 0;
+}
+
 int om_snet_init(struct om_snet *s, const struct om_snet_cfg *cfg,
 		 struct om_identity *id)
 {
@@ -661,6 +697,7 @@ int om_snet_init(struct om_snet *s, const struct om_snet_cfg *cfg,
 		uloop_fd_add(&s->lfd, ULOOP_READ);
 		s->have_network_key =
 			read_exact(path, s->network_key, 32);
+		om_store_foreach(load_adopted_cb, s);
 		return 0;
 	}
 
@@ -693,15 +730,21 @@ int om_snet_adopt(struct om_snet *s, const uint8_t id[OM_ID_LEN],
 	struct om_adopted_node *a = adopted_find(s, id);
 
 	if (a) {
-		if (name && *name)
+		if (name && *name) {
 			snprintf(a->name, sizeof(a->name), "%s", name);
+			om_store_rename(id, name);
+		}
 		return 0;
 	}
 	if (s->n_pending >= OM_SNET_MAX_PENDING)
 		return -1;
 	if (pending_has(s, id))
 		return 0;
-	memcpy(s->pending[s->n_pending++], id, OM_ID_LEN);
+	memcpy(s->pending[s->n_pending].id, id, OM_ID_LEN);
+	snprintf(s->pending[s->n_pending].name,
+		 sizeof(s->pending[s->n_pending].name), "%s",
+		 (name && *name) ? name : "");
+	s->n_pending++;
 	return 0;
 }
 

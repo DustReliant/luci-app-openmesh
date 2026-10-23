@@ -199,10 +199,6 @@ int main(int argc, char **argv)
 
 	uloop_init();
 
-	if (om_ubus_init(&ubus_ctx, &identity, &disc) < 0)
-		ULOG_WARN("ubus unavailable (ubusd down or object taken), "
-			  "running without RPC\n");
-
 	/* role: explicit uci role wins; auto = controller unless a
 	 * controller address is configured */
 	memset(&sc, 0, sizeof(sc));
@@ -245,7 +241,14 @@ int main(int argc, char **argv)
 	}
 	snet.on_adopted = on_adopted;
 	snet.on_agent_state = on_agent_state;
-	om_ubus_set_snet(&ubus_ctx, &snet);
+
+	/* ubus RPC belongs to the controller role only (LuCI lives there);
+	 * agent instances run headless and log instead */
+	if (sc.is_controller) {
+		if (om_ubus_init(&ubus_ctx, &identity, &disc) < 0)
+			ULOG_WARN("ubus unavailable, running without RPC\n");
+		om_ubus_set_snet(&ubus_ctx, &snet);
+	}
 
 	heartbeat_timer.cb = heartbeat_cb;
 	uloop_timeout_set(&heartbeat_timer, 1000);
