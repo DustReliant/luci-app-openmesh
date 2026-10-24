@@ -63,6 +63,8 @@ static void poll_wifi_links(struct om_monitor *m)
 		trim(ifname);
 		if (!*ifname)
 			continue;
+		snprintf(m->mesh_ifname, sizeof(m->mesh_ifname), "%s",
+			 ifname);
 		FILE *a;
 		char line[256], prev_mac[20] = "";
 

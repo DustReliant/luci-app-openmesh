@@ -314,3 +314,28 @@ int om_store_backhaul_get(char *mesh_id, size_t id_sz, char *mesh_key,
 	uci_free_context(c);
 	return found;
 }
+
+void om_store_backhaul_mode(char *mode, size_t mode_sz)
+{
+	struct uci_context *c = uci_alloc_context();
+	struct uci_package *p = NULL;
+	struct uci_element *e;
+
+	snprintf(mode, mode_sz, "wifi");
+	if (!c)
+		return;
+	if (uci_load(c, "network", &p) == UCI_OK) {
+		uci_foreach_element(&p->sections, e) {
+			struct uci_section *t = uci_to_section(e);
+			struct uci_option *o = uci_lookup_option(c, t,
+								 "proto");
+
+			if (o && o->type == UCI_TYPE_STRING &&
+			    !strcmp(o->v.string, "batadv")) {
+				snprintf(mode, mode_sz, "hybrid");
+				break;
+			}
+		}
+	}
+	uci_free_context(c);
+}

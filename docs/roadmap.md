@@ -31,5 +31,6 @@
 
 - **V0.2**：模式 B 组网（11s + eth 同挂 bat0）；mesh11sd 接管动态 radio 管理；回程选择展示页（读 batman-adv originators/mesh 状态）；72h 稳定性测试。
 - **V0.3**：hostapd 802.11k/v/r UCI 选项编排（**先在 01 调研确认各版本可用选项，禁止编造**）；dawn/usteer 评估（目标 15/16 可能直接复用它们而非自研）；客户端列表聚合。
+  - 已开工：M14 漫游编排（已交付，见 `design/m14-roaming.md`）；M15 拓扑双视图（网络拓扑 + Mesh 拓扑分视图，见 `design/m15-topology-views.md`）。
 - **V0.4**：健康度模型、故障注入测试框架、控制器接管流程（手动指定备份）。
 - **V1.0**：VLAN/Guest/IoT 编排、QoS、流量统计（复用 nl80211/ubus 计数，不自研采集协议）。

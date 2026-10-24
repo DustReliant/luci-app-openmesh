@@ -369,6 +369,36 @@ static int om_get_links(struct ubus_context *ctx, struct ubus_object *obj,
 	return ubus_send_reply(ctx, req, b.head);
 }
 
+static int om_get_mesh_info(struct ubus_context *ctx, struct ubus_object *obj,
+			    struct ubus_request_data *req, const char *method,
+			    struct blob_attr *msg)
+{
+	struct om_ubus *u = OM_HANDLER_CTX(obj);
+	char mesh_id[33], mesh_key[33], band[8];
+
+	(void)method;
+	(void)msg;
+	blob_buf_init(&b, 0);
+	if (om_store_backhaul_get(mesh_id, sizeof(mesh_id), mesh_key,
+				  sizeof(mesh_key), band, sizeof(band)) == 0 &&
+	    *mesh_id) {
+		char mode[8];
+
+		om_store_backhaul_mode(mode, sizeof(mode));
+		blobmsg_add_u8(&b, "configured", 1);
+		blobmsg_add_string(&b, "mesh_id", mesh_id);
+		blobmsg_add_string(&b, "band", band);
+		blobmsg_add_string(&b, "mode", mode);
+		blobmsg_add_u8(&b, "key_set", !!*mesh_key);
+		if (u->mon && u->mon->mesh_ifname[0])
+			blobmsg_add_string(&b, "mesh_ifname",
+					   u->mon->mesh_ifname);
+	} else {
+		blobmsg_add_u8(&b, "configured", 0);
+	}
+	return ubus_send_reply(ctx, req, b.head);
+}
+
 static int om_roaming_apply(struct ubus_context *ctx, struct ubus_object *obj,
 			    struct ubus_request_data *req, const char *method,
 			    struct blob_attr *msg)
@@ -418,6 +448,7 @@ static const struct ubus_method om_methods[] = {
 	UBUS_METHOD_NOARG("apply_confirm", om_apply_confirm),
 	UBUS_METHOD_NOARG("apply_rollback", om_apply_rollback),
 	UBUS_METHOD_NOARG("get_links", om_get_links),
+	UBUS_METHOD_NOARG("get_mesh_info", om_get_mesh_info),
 	UBUS_METHOD("roaming_apply", om_roaming_apply, om_roam_policy),
 };
 
