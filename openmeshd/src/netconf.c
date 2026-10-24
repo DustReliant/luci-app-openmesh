@@ -278,20 +278,26 @@ static void roam_emit_options(FILE *out, bool k, bool v, bool r,
 
 /*
  * Direct file surgery for the roaming options: replace the option lines
- * inside each target wifi-iface block. Bypasses uci set/commit because
- * the netifd wireless reload pipeline rewrites /etc/config/wireless and
- * was observed leaving some options only in the volatile uci delta
- * (never in the file). The transaction snapshot/rollback covers us.
+ * inside each target wifi-iface block, matching sections by file order
+ * (anonymous cfgXXXX sections have no name in the file).
+ *
+ * NOTE on history: an earlier comment blamed "the netifd wireless reload
+ * pipeline" for stripping options - source audit disproved that (netifd
+ * is a pure reader of /etc/config/wireless; see
+ * docs/research/v03-research-report.md). The real mechanisms were our
+ * own 30s transaction rollback (restores the pre-transaction snapshot,
+ * then reloads again) and the uci delta illusion (uncommitted changes
+ * apply at runtime without ever reaching the file).
  */
-static int roam_rewrite_file(const char *path, const char secs[][32],
-			     int nsecs, bool k, bool v, bool r,
+static int roam_rewrite_file(const char *path, const bool is_ap[],
+			     int n_ifaces, bool k, bool v, bool r,
 			     const char *domain)
 {
 	FILE *in = fopen(path, "r");
 	FILE *out;
 	char tmp[OM_PATH_MAX];
 	char line[256];
-	char cur_sec[32] = "";
+	int idx = -1;
 	bool in_target = false;
 
 	if (!in)
@@ -304,19 +310,17 @@ static int roam_rewrite_file(const char *path, const char secs[][32],
 	}
 
 	while (fgets(line, sizeof(line), in)) {
-		char name[32];
-
-		if (sscanf(line, "config %*s '%31s'", name) == 1 ||
-		    sscanf(line, "config %*s %31s", name) == 1) {
+		/* wifi-iface sections matched by FILE ORDER so anonymous
+		 * (cfgXXXX) sections are handled too; uci enumeration and
+		 * file order agree because uci preserves section order */
+		if (!strncmp(line, "config wifi-iface", 17) &&
+		    (line[17] == '\n' || line[17] == '\r' ||
+		     line[17] == ' ' || line[17] == '\t' ||
+		     line[17] == '\'' || line[17] == '\0')) {
 			if (in_target)
 				roam_emit_options(out, k, v, r, domain);
-			in_target = false;
-			snprintf(cur_sec, sizeof(cur_sec), "%s", name);
-			for (int i = 0; i < nsecs; i++)
-				if (!strcmp(cur_sec, secs[i])) {
-					in_target = true;
-					break;
-				}
+			idx++;
+			in_target = idx < n_ifaces && is_ap[idx];
 			fputs(line, out);
 			continue;
 		}
@@ -349,6 +353,16 @@ static int roam_rewrite_file(const char *path, const char secs[][32],
 		return -1;
 	}
 	return 0;
+}
+
+/* wpad variant probe: without WNM, writing bss_transition makes hostapd
+ * reject the whole BSS config ("unknown configuration item") - see
+ * docs/research/v03-research-report.md. Exact-line match: the STA-side
+ * symbol bss_transition_request_tx is a substring trap on basic wpad. */
+static bool wpad_has_wnm(void)
+{
+	return system("strings /usr/sbin/wpad 2>/dev/null | "
+		      "grep -qx bss_transition_request") == 0;
 }
 
 int om_netconf_roaming_apply(struct om_netconf *nc, const char *state_dir,
@@ -389,8 +403,16 @@ int om_netconf_roaming_apply(struct om_netconf *nc, const char *state_dir,
 		goto fail;
 
 	{
-		char secs[8][32];
-		int nsecs = 0;
+		bool is_ap[16];
+		int n_ifaces = 0;
+
+		/* WNM guard: bss_transition on a non-WNM wpad variant makes
+		 * hostapd reject the whole BSS config - degrade v, keep k/r */
+		if (v && !wpad_has_wnm()) {
+			ULOG_WARN("roaming: wpad lacks WNM, skipping "
+				  "bss_transition (needs wpad-mesh/full)\n");
+			v = false;
+		}
 
 		uci_foreach_element(&p->sections, e) {
 			struct uci_section *s = uci_to_section(e);
@@ -399,22 +421,26 @@ int om_netconf_roaming_apply(struct om_netconf *nc, const char *state_dir,
 
 			if (strcmp(s->type, "wifi-iface"))
 				continue;
+			if (n_ifaces >= 16)
+				break;
 			o = uci_lookup_option(c, s, "mode");
 			mode = (o && o->type == UCI_TYPE_STRING) ?
 				o->v.string : "";
-			if (strcmp(mode, "ap"))
-				continue;
-			if (nsecs < 8)
-				snprintf(secs[nsecs++], 32, "%s", s->e.name);
+			is_ap[n_ifaces++] = !strcmp(mode, "ap");
 		}
 		uci_free_context(c);
 		c = NULL;
 
-		if (nsecs == 0 ||
-		    roam_rewrite_file("/etc/config/wireless", secs, nsecs,
+		int n_ap = 0;
+		for (int i = 0; i < n_ifaces; i++)
+			if (is_ap[i])
+				n_ap++;
+
+		if (n_ap == 0 ||
+		    roam_rewrite_file("/etc/config/wireless", is_ap, n_ifaces,
 				      k, v, r, domain) < 0)
 			goto fail;
-		touched = nsecs;
+		touched = n_ap;
 	}
 	if (!touched)
 		goto fail;
