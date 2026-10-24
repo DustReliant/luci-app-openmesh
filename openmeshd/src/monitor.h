@@ -28,6 +28,7 @@ struct om_monitor {
 	struct om_link links[OM_MAX_LINKS];
 	unsigned n_links;
 	time_t last_poll;
+	char mesh_ifname[16];	/* last seen 802.11s iface, "" = none */
 };
 
 /*

@@ -168,3 +168,18 @@ msgstr "漫游（k/v/r）已应用。FT 域：%s — 请点击“保留配置”
 
 msgid "Roaming apply failed (no AP interfaces?)"
 msgstr "漫游应用失败（没有 AP 接口？）"
+
+msgid "Network topology"
+msgstr "网络拓扑"
+
+msgid "Mesh network not created yet"
+msgstr "尚未创建 Mesh 网络"
+
+msgid "Use the Mesh Wizard to create or join a mesh network."
+msgstr "请使用 Mesh 向导创建或加入 Mesh 网络。"
+
+msgid "Waiting for peers (single node)"
+msgstr "等待对端（单节点）"
+
+msgid "Peer not managed by this controller"
+msgstr "不受本控制器管理的对端"

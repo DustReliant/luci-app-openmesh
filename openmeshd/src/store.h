@@ -35,4 +35,7 @@ int om_store_backhaul_set(const char *mesh_id, const char *mesh_key,
 int om_store_backhaul_get(char *mesh_id, size_t id_sz, char *mesh_key,
 			  size_t key_sz, char *band, size_t band_sz);
 
+/* Backhaul mode: "hybrid" if network has a batadv proto iface, else "wifi". */
+void om_store_backhaul_mode(char *mode, size_t mode_sz);
+
 #endif /* OPENMESH_STORE_H */
