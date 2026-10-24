@@ -45,6 +45,8 @@ static void node_to_blob(const struct om_node_info *n)
 	blobmsg_add_string(&b, "role", n->role);
 	blobmsg_add_string(&b, "model", n->model);
 	blobmsg_add_string(&b, "fw", n->fw);
+	if (n->mac[0])
+		blobmsg_add_string(&b, "mac", n->mac);
 	blobmsg_add_string(&b, "addr", n->addr);
 	blobmsg_add_u32(&b, "first_seen", (uint32_t)n->first_seen);
 	blobmsg_add_u32(&b, "last_seen", (uint32_t)n->last_seen);

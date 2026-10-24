@@ -124,8 +124,8 @@ msgstr "在线"
 msgid "offline"
 msgstr "离线"
 
-msgid "Solid: adopted (green online / red offline); dashed: discovered, not adopted."
-msgstr "实线：已领养（绿 = 在线 / 红 = 离线）；虚线：已发现、未领养。"
+msgid "Discovered, not adopted"
+msgstr "已发现，未领养"
 
 msgid "Backhaul links"
 msgstr "回程链路"

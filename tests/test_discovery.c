@@ -56,6 +56,7 @@ static void mkcfg(struct om_disc_cfg *c)
 	strcpy(c->role, "auto");
 	strcpy(c->model, "test-model");
 	strcpy(c->fw, "test-fw");
+	strcpy(c->mac, "aa:bb:cc:dd:ee:ff");
 }
 
 int main(void)
@@ -86,6 +87,7 @@ int main(void)
 	CHECK(strcmp(da.nodes[0].model, "test-model") == 0);
 	CHECK(strcmp(da.nodes[0].fw, "test-fw") == 0);
 	CHECK(strcmp(da.nodes[0].addr, "192.168.40.9") == 0);
+	CHECK(strcmp(da.nodes[0].mac, "aa:bb:cc:dd:ee:ff") == 0);
 
 	/* 3. exact replay rejected (nonce ring), no duplicate callback */
 	CHECK(om_disc_handle_packet(&da, pkt, n, "192.168.40.9", now) == -1);
