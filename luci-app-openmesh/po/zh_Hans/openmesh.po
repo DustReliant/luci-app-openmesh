@@ -159,3 +159,12 @@ msgstr "Mesh 向导"
 
 msgid "Topology"
 msgstr "拓扑"
+
+msgid "Apply roaming enhancement (802.11k/v/r)"
+msgstr "应用漫游增强（802.11k/v/r）"
+
+msgid "Roaming (k/v/r) applied. Domain: %s - confirm with Keep"
+msgstr "漫游（k/v/r）已应用。FT 域：%s — 请点击“保留配置”确认"
+
+msgid "Roaming apply failed (no AP interfaces?)"
+msgstr "漫游应用失败（没有 AP 接口？）"

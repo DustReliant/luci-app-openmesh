@@ -9,7 +9,7 @@
 		},
 		"write": {
 			"ubus": {
-				"openmesh": [ "adopt", "revoke", "mesh_create", "mesh_join", "apply_confirm", "apply_rollback" ]
+				"openmesh": [ "adopt", "revoke", "mesh_create", "mesh_join", "apply_confirm", "apply_rollback", "roaming_apply" ]
 			}
 		}
 	}

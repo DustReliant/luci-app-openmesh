@@ -7,6 +7,7 @@
 
 var callMeshCreate = rpc.declare({ object: 'openmesh', method: 'mesh_create',
 				   params: [ 'mesh_name', 'band', 'key', 'mode' ] });
+var callRoaming    = rpc.declare({ object: 'openmesh', method: 'roaming_apply' });
 var callConfirm    = rpc.declare({ object: 'openmesh', method: 'apply_confirm' });
 var callRollback   = rpc.declare({ object: 'openmesh', method: 'apply_rollback' });
 
@@ -74,6 +75,20 @@ return view.extend({
 			}
 		}, _('Roll back now'));
 
+		var roamBtn = E('button', {
+			'class': 'btn cbi-button cbi-button-apply',
+			'click': function() {
+				return callRoaming().then(function(rv) {
+					statusLine.textContent =
+						_('Roaming (k/v/r) applied. Domain: %s - confirm with Keep')
+							.format(rv.mobility_domain || '');
+				}, function() {
+					statusLine.textContent =
+						_('Roaming apply failed (no AP interfaces?)');
+				});
+			}
+		}, _('Apply roaming enhancement (802.11k/v/r)'));
+
 		return E('div', {}, [
 			E('h3', {}, _('Create mesh network')),
 			E('div', { 'class': 'cbi-section' }, [
@@ -122,6 +137,10 @@ return view.extend({
 				]),
 				E('div', { 'class': 'cbi-page-actions' }, [
 					createBtn, ' ', keepBtn, ' ', undoBtn
+				]),
+				E('hr'),
+				E('div', { 'class': 'cbi-page-actions' }, [
+					roamBtn
 				]),
 				statusLine = E('p', {}, '')
 			])

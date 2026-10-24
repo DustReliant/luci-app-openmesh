@@ -47,7 +47,7 @@ static void read_mac(char *out, size_t sz)
 	DIR *d = opendir("/sys/class/net");
 	struct dirent *e;
 
-	snprintf(out, sz, "");
+	out[0] = '\0';
 	if (!d)
 		return;
 	while ((e = readdir(d))) {
