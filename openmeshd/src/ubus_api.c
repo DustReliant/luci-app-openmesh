@@ -35,6 +35,13 @@ static const struct blobmsg_policy om_mesh_policy[4] = {
 	{ "mode", BLOBMSG_TYPE_STRING },
 };
 
+static const struct blobmsg_policy om_roam_policy[4] = {
+	{ "k", BLOBMSG_TYPE_INT8 },
+	{ "v", BLOBMSG_TYPE_INT8 },
+	{ "r", BLOBMSG_TYPE_INT8 },
+	{ "domain", BLOBMSG_TYPE_STRING },
+};
+
 static void node_to_blob(const struct om_node_info *n)
 {
 	char hex[OM_ID_HEX_LEN];
@@ -362,6 +369,42 @@ static int om_get_links(struct ubus_context *ctx, struct ubus_object *obj,
 	return ubus_send_reply(ctx, req, b.head);
 }
 
+static int om_roaming_apply(struct ubus_context *ctx, struct ubus_object *obj,
+			    struct ubus_request_data *req, const char *method,
+			    struct blob_attr *msg)
+{
+	struct om_ubus *u = OM_HANDLER_CTX(obj);
+	struct blob_attr *tb[4] = { NULL, NULL, NULL, NULL };
+	bool k = true, v = true, r = true;
+	const char *domain = NULL;
+	char gen_domain[5];
+	uint32_t rnd;
+
+	(void)method;
+	if (!u->netconf)
+		return UBUS_STATUS_NOT_FOUND;
+	blobmsg_parse(om_roam_policy, 4, tb, blob_data(msg), blob_len(msg));
+	if (tb[0]) k = blobmsg_get_u8(tb[0]);
+	if (tb[1]) v = blobmsg_get_u8(tb[1]);
+	if (tb[2]) r = blobmsg_get_u8(tb[2]);
+	if (tb[3]) domain = blobmsg_get_string(tb[3]);
+	if (!domain || strlen(domain) != 4) {
+		randombytes_buf(&rnd, sizeof(rnd));
+		snprintf(gen_domain, sizeof(gen_domain), "%04x",
+			 rnd & 0xffff);
+		domain = gen_domain;
+	}
+	if (om_netconf_roaming_apply(u->netconf, u->state_dir, k, v, r,
+				     domain) < 0)
+		return UBUS_STATUS_UNKNOWN_ERROR;
+
+	blob_buf_init(&b, 0);
+	blobmsg_add_string(&b, "result", "applied");
+	blobmsg_add_string(&b, "mobility_domain", domain);
+	blobmsg_add_u32(&b, "confirm_window", 30);
+	return ubus_send_reply(ctx, req, b.head);
+}
+
 static const struct ubus_method om_methods[] = {
 	UBUS_METHOD_NOARG("status", om_status),
 	UBUS_METHOD_NOARG("list_nodes", om_list_nodes),
@@ -375,6 +418,7 @@ static const struct ubus_method om_methods[] = {
 	UBUS_METHOD_NOARG("apply_confirm", om_apply_confirm),
 	UBUS_METHOD_NOARG("apply_rollback", om_apply_rollback),
 	UBUS_METHOD_NOARG("get_links", om_get_links),
+	UBUS_METHOD("roaming_apply", om_roaming_apply, om_roam_policy),
 };
 
 static struct ubus_object_type om_obj_type =

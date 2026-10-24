@@ -109,8 +109,8 @@ static void pick_radio(const char *band, char *out, size_t outsz)
 static void drop_om_sections(struct uci_context *c, struct uci_package *p,
 			     const char *pkg)
 {
-	struct uci_element *e, *tmp;
 	struct uci_ptr ptr;
+	struct uci_element *e, *tmp;
 
 	uci_foreach_element_safe(&p->sections, tmp, e) {
 		struct uci_section *s = uci_to_section(e);
@@ -129,8 +129,7 @@ static void drop_om_sections(struct uci_context *c, struct uci_package *p,
 
 /* idempotent mode B network config via uci CLI */
 static int apply_network_hybrid(void)
-{
-	const char *cmds[] = {
+{	const char *cmds[] = {
 		"uci -q set network." OM_BAT_IF "=interface",
 		"uci -q set network." OM_BAT_IF ".proto='batadv'",
 		"uci -q set network." OM_BAT_IF ".om_managed='1'",
@@ -258,6 +257,180 @@ int om_netconf_mesh_apply(struct om_netconf *nc, const char *state_dir,
 fail:
 	if (cw)
 		uci_free_context(cw);
+	for (int i = 0; i < nc->n_files; i++)
+		unlink(nc->bak_files[i]);
+	unlink(marker);
+	nc->n_files = 0;
+	return -1;
+}
+
+static void roam_emit_options(FILE *out, bool k, bool v, bool r,
+			      const char *domain)
+{
+	fprintf(out, "	option ieee80211k '%d'\n", k ? 1 : 0);
+	fprintf(out, "	option bss_transition '%d'\n", v ? 1 : 0);
+	fprintf(out, "	option ieee80211r '%d'\n", r ? 1 : 0);
+	if (r) {
+		fprintf(out, "	option mobility_domain '%s'\n", domain);
+		fprintf(out, "	option ft_psk_generate_local '1'\n");
+	}
+}
+
+/*
+ * Direct file surgery for the roaming options: replace the option lines
+ * inside each target wifi-iface block. Bypasses uci set/commit because
+ * the netifd wireless reload pipeline rewrites /etc/config/wireless and
+ * was observed leaving some options only in the volatile uci delta
+ * (never in the file). The transaction snapshot/rollback covers us.
+ */
+static int roam_rewrite_file(const char *path, const char secs[][32],
+			     int nsecs, bool k, bool v, bool r,
+			     const char *domain)
+{
+	FILE *in = fopen(path, "r");
+	FILE *out;
+	char tmp[OM_PATH_MAX];
+	char line[256];
+	char cur_sec[32] = "";
+	bool in_target = false;
+
+	if (!in)
+		return -1;
+	snprintf(tmp, sizeof(tmp), "%s.roamtmp", path);
+	out = fopen(tmp, "w");
+	if (!out) {
+		fclose(in);
+		return -1;
+	}
+
+	while (fgets(line, sizeof(line), in)) {
+		char name[32];
+
+		if (sscanf(line, "config %*s '%31s'", name) == 1 ||
+		    sscanf(line, "config %*s %31s", name) == 1) {
+			if (in_target)
+				roam_emit_options(out, k, v, r, domain);
+			in_target = false;
+			snprintf(cur_sec, sizeof(cur_sec), "%s", name);
+			for (int i = 0; i < nsecs; i++)
+				if (!strcmp(cur_sec, secs[i])) {
+					in_target = true;
+					break;
+				}
+			fputs(line, out);
+			continue;
+		}
+		if (in_target) {
+			static const char *ours[] = {
+				"ieee80211k", "bss_transition", "ieee80211r",
+				"mobility_domain", "ft_psk_generate_local"
+			};
+			char opt[32];
+			bool skip = false;
+
+			if (sscanf(line, " option %31s", opt) == 1)
+				for (size_t i = 0; i < 5; i++)
+					if (!strcmp(opt, ours[i]))
+						skip = true;
+			if (skip)
+				continue;
+		}
+		fputs(line, out);
+	}
+	if (in_target)
+		roam_emit_options(out, k, v, r, domain);
+	fclose(in);
+	if (fclose(out) != 0) {
+		unlink(tmp);
+		return -1;
+	}
+	if (rename(tmp, path) != 0) {
+		unlink(tmp);
+		return -1;
+	}
+	return 0;
+}
+
+int om_netconf_roaming_apply(struct om_netconf *nc, const char *state_dir,
+			     bool k, bool v, bool r, const char *domain)
+{
+	struct uci_context *c;
+	struct uci_package *p = NULL;
+	struct uci_element *e;
+	char marker[OM_PATH_MAX];
+	static uint32_t gen = 0;
+	int touched = 0;
+	FILE *f;
+
+	if (nc->active)
+		return -1;
+	if (!domain || strlen(domain) != 4)
+		return -1;
+
+	nc->n_files = 1;
+	snprintf(nc->dest_files[0], OM_PATH_MAX, "/etc/config/wireless");
+	snprintf(nc->bak_files[0], OM_PATH_MAX, "%s/wireless.om-bak",
+		 state_dir);
+	if (copy_file(nc->dest_files[0], nc->bak_files[0]) < 0) {
+		nc->n_files = 0;
+		return -1;
+	}
+	gen++;
+	snprintf(marker, sizeof(marker), "%s/%s", state_dir, TXN_MARKER);
+	f = fopen(marker, "w");
+	if (!f)
+		goto fail;
+	fprintf(f, "gen=%u\nfiles=1\n", gen);
+	fclose(f);
+	snprintf(nc->marker, sizeof(nc->marker), "%s", marker);
+
+	c = uci_alloc_context();
+	if (!c || uci_load(c, "wireless", &p) != UCI_OK)
+		goto fail;
+
+	{
+		char secs[8][32];
+		int nsecs = 0;
+
+		uci_foreach_element(&p->sections, e) {
+			struct uci_section *s = uci_to_section(e);
+			struct uci_option *o;
+			const char *mode;
+
+			if (strcmp(s->type, "wifi-iface"))
+				continue;
+			o = uci_lookup_option(c, s, "mode");
+			mode = (o && o->type == UCI_TYPE_STRING) ?
+				o->v.string : "";
+			if (strcmp(mode, "ap"))
+				continue;
+			if (nsecs < 8)
+				snprintf(secs[nsecs++], 32, "%s", s->e.name);
+		}
+		uci_free_context(c);
+		c = NULL;
+
+		if (nsecs == 0 ||
+		    roam_rewrite_file("/etc/config/wireless", secs, nsecs,
+				      k, v, r, domain) < 0)
+			goto fail;
+		touched = nsecs;
+	}
+	if (!touched)
+		goto fail;
+
+	reload_network();
+	nc->active = true;
+	nc->committed = false;
+	nc->generation = gen;
+	nc->timer.cb = txn_timer_cb;
+	uloop_timeout_set(&nc->timer, OM_TXN_TIMEOUT * 1000);
+	ULOG_NOTE("netconf: roaming k=%d v=%d r=%d domain=%s on %d AP ifaces "
+		  "(gen %u, confirm within %ds)\n", k, v, r, domain, touched,
+		  gen, OM_TXN_TIMEOUT);
+	return 0;
+
+fail:
 	for (int i = 0; i < nc->n_files; i++)
 		unlink(nc->bak_files[i]);
 	unlink(marker);
