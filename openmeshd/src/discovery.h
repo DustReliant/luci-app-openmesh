@@ -27,6 +27,7 @@ struct om_node_info {
 	char role[16];
 	char model[48];
 	char fw[32];
+	char mac[18];		/* primary MAC, "" if not announced */
 	char addr[48];		/* source IP of last announce */
 	time_t first_seen;
 	time_t last_seen;
@@ -42,6 +43,7 @@ struct om_disc_cfg {
 	char role[16];
 	char model[48];
 	char fw[32];
+	char mac[18];		/* primary MAC, "" to omit */
 };
 
 struct om_disc {

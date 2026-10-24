@@ -202,6 +202,7 @@ int main(int argc, char **argv)
 	snprintf(dc.role, sizeof(dc.role), "%s", mc.role);
 	snprintf(dc.model, sizeof(dc.model), "%s", mc.model);
 	snprintf(dc.fw, sizeof(dc.fw), "%s", mc.fw);
+	snprintf(dc.mac, sizeof(dc.mac), "%s", mc.mac);
 
 	if (om_disc_init(&disc, &dc, &identity) < 0) {
 		ULOG_ERR("discovery init failed on port %d: %s\n",

@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <dirent.h>
 
 #include <uci.h>
 
@@ -38,6 +39,52 @@ static void read_file_line(const char *path, const char *prefix, char *out,
 	fclose(f);
 }
 
+/* Announce the MAC that link monitors will match against: the 802.11s
+ * interface MAC when a mesh exists (iwinfo assoclist peers), otherwise
+ * the primary br-lan MAC. */
+static void read_mac(char *out, size_t sz)
+{
+	DIR *d = opendir("/sys/class/net");
+	struct dirent *e;
+
+	snprintf(out, sz, "");
+	if (!d)
+		return;
+	while ((e = readdir(d))) {
+		char path[64];
+		FILE *f;
+
+		if (!strstr(e->d_name, "-mesh"))
+			continue;
+		snprintf(path, sizeof(path),
+			 "/sys/class/net/%s/address", e->d_name);
+		f = fopen(path, "r");
+		if (!f)
+			continue;
+		if (fgets(out, sz, f)) {
+			out[strcspn(out, "\n")] = '\0';
+			if (strlen(out) != 17)
+				out[0] = '\0';
+			fclose(f);
+			break;
+		}
+		fclose(f);
+	}
+	closedir(d);
+	if (!out[0]) {
+		FILE *f = fopen("/sys/class/net/br-lan/address", "r");
+
+		if (!f)
+			return;
+		if (fgets(out, sz, f)) {
+			out[strcspn(out, "\n")] = '\0';
+			if (strlen(out) != 17)
+				out[0] = '\0';
+		}
+		fclose(f);
+	}
+}
+
 int om_main_load(struct om_main_cfg *m)
 {
 	struct uci_context *c;
@@ -56,6 +103,7 @@ int om_main_load(struct om_main_cfg *m)
 		       "unknown");
 	read_file_line("/etc/openwrt_release", "DISTRIB_RELEASE='", m->fw,
 		       sizeof(m->fw), "unknown");
+	read_mac(m->mac, sizeof(m->mac));
 
 	c = uci_alloc_context();
 	if (!c)

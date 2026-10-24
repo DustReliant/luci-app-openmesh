@@ -94,8 +94,9 @@ size_t om_disc_build_packet(const struct om_disc *d, uint8_t *out,
 
 	n = snprintf((char *)out + OM_HDR_LEN,
 		     outlen - OM_HDR_LEN - OM_SIG_LEN,
-		     "{\"role\":\"%s\",\"model\":\"%s\",\"fw\":\"%s\"}",
-		     d->cfg.role, d->cfg.model, d->cfg.fw);
+		     "{\"role\":\"%s\",\"model\":\"%s\",\"fw\":\"%s\",\"mac\":\"%s\"}",
+		     d->cfg.role, d->cfg.model, d->cfg.fw,
+		     d->cfg.mac[0] ? d->cfg.mac : "");
 	if (n < 0)
 		return 0;
 
@@ -191,13 +192,22 @@ int om_disc_handle_packet(struct om_disc *d, const uint8_t *buf, size_t len,
 	if (!memchr(body, '\0', body_max))
 		return -1;
 
-	/* strict: role is mandatory; model/fw optional */
+	/* strict: role is mandatory; model/fw/mac optional */
 	if (om_json_get_str(body, body_max, "role", role, sizeof(role)) < 0)
 		return -1;
 	if (om_json_get_str(body, body_max, "model", model, sizeof(model)) < 0)
 		snprintf(model, sizeof(model), "unknown");
 	if (om_json_get_str(body, body_max, "fw", fw, sizeof(fw)) < 0)
 		snprintf(fw, sizeof(fw), "unknown");
+	{
+		char mac[18];
+
+		if (om_json_get_str(body, body_max, "mac", mac,
+				    sizeof(mac)) == 0 && strlen(mac) == 17)
+			snprintf(n->mac, sizeof(n->mac), "%s", mac);
+		else
+			n->mac[0] = '\0';
+	}
 
 	/* commit */
 	if (n->n_nonces < OM_NONCE_RING) {
