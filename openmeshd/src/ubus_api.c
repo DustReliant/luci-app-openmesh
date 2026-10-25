@@ -369,6 +369,39 @@ static int om_get_links(struct ubus_context *ctx, struct ubus_object *obj,
 	return ubus_send_reply(ctx, req, b.head);
 }
 
+static int om_get_clients(struct ubus_context *ctx, struct ubus_object *obj,
+			  struct ubus_request_data *req, const char *method,
+			  struct blob_attr *msg)
+{
+	struct om_ubus *u = OM_HANDLER_CTX(obj);
+	void *a;
+
+	(void)method;
+	(void)msg;
+	blob_buf_init(&b, 0);
+	a = blobmsg_open_array(&b, "clients");
+	if (u->mon)
+		for (unsigned i = 0; i < u->mon->n_stas; i++) {
+			const struct om_sta *s = &u->mon->stas[i];
+			void *t = blobmsg_open_table(&b, NULL);
+
+			blobmsg_add_string(&b, "mac", s->mac);
+			blobmsg_add_string(&b, "ifname", s->ifname);
+			if (s->ssid[0])
+				blobmsg_add_string(&b, "ssid", s->ssid);
+			if (s->rssi)
+				blobmsg_add_u32(&b, "rssi",
+						(uint32_t)s->rssi);
+			if (s->rx_rate)
+				blobmsg_add_u32(&b, "rx_kbps", s->rx_rate);
+			if (s->tx_rate)
+				blobmsg_add_u32(&b, "tx_kbps", s->tx_rate);
+			blobmsg_close_table(&b, t);
+		}
+	blobmsg_close_array(&b, a);
+	return ubus_send_reply(ctx, req, b.head);
+}
+
 static int om_get_mesh_info(struct ubus_context *ctx, struct ubus_object *obj,
 			    struct ubus_request_data *req, const char *method,
 			    struct blob_attr *msg)
@@ -448,6 +481,7 @@ static const struct ubus_method om_methods[] = {
 	UBUS_METHOD_NOARG("apply_confirm", om_apply_confirm),
 	UBUS_METHOD_NOARG("apply_rollback", om_apply_rollback),
 	UBUS_METHOD_NOARG("get_links", om_get_links),
+	UBUS_METHOD_NOARG("get_clients", om_get_clients),
 	UBUS_METHOD_NOARG("get_mesh_info", om_get_mesh_info),
 	UBUS_METHOD("roaming_apply", om_roaming_apply, om_roam_policy),
 };

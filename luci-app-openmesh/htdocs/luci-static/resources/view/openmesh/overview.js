@@ -13,6 +13,7 @@ var callAdopt   = rpc.declare({ object: 'openmesh', method: 'adopt',
 				params: [ 'name', 'id' ] });
 var callRevoke  = rpc.declare({ object: 'openmesh', method: 'revoke',
 				params: [ 'id' ] });
+var callClients = rpc.declare({ object: 'openmesh', method: 'get_clients' });
 
 function shortId(id) {
 	return (id || '').substring(0, 16) + '…';
@@ -31,7 +32,8 @@ return view.extend({
 			L.resolveDefault(callStatus(), {}),
 			L.resolveDefault(callAdopted(), { nodes: [] }),
 			L.resolveDefault(callPending(), { nodes: [] }),
-			L.resolveDefault(callNodes(), { nodes: [] })
+			L.resolveDefault(callNodes(), { nodes: [] }),
+			L.resolveDefault(callClients(), { clients: [] })
 		]);
 	},
 
@@ -150,6 +152,43 @@ return view.extend({
 		]);
 	},
 
+	renderClients: function(clients) {
+		var rows = (clients.clients || []).map(function(c) {
+			return E('tr', { 'class': 'tr' }, [
+				E('td', { 'class': 'td' }, c.mac),
+				E('td', { 'class': 'td' }, c.ssid || '-'),
+				E('td', { 'class': 'td' }, c.ifname),
+				E('td', { 'class': 'td' },
+				  c.rssi ? _('%d dBm').format(c.rssi) : '-'),
+				E('td', { 'class': 'td' },
+				  c.rx_kbps ? _('%d kbit/s').format(c.rx_kbps) : '-'),
+				E('td', { 'class': 'td' },
+				  c.tx_kbps ? _('%d kbit/s').format(c.tx_kbps) : '-')
+			]);
+		});
+
+		return E('div', { 'class': 'cbi-section' }, [
+			E('h3', {}, _('Local clients')),
+			E('table', { 'class': 'table' }, [
+				E('tr', { 'class': 'tr table-titles' }, [
+					E('th', { 'class': 'th' }, _('MAC address')),
+					E('th', { 'class': 'th' }, _('SSID')),
+					E('th', { 'class': 'th' }, _('Interface')),
+					E('th', { 'class': 'th' }, _('RSSI')),
+					E('th', { 'class': 'th' }, 'RX'),
+					E('th', { 'class': 'th' }, 'TX')
+				]),
+				rows.length ? rows :
+					E('tr', { 'class': 'tr placeholder' }, [
+						E('td', { 'class': 'td center', colspan: 6 },
+						  _('No clients connected'))
+					])
+			]),
+			E('p', { 'style': 'color:#666;font-size:small' },
+			  _('Clients on this controller. Clients on mesh nodes appear after dual-node support.'))
+		]);
+	},
+
 	render: function(data) {
 		var self = this;
 		var container = E('div', {}, [ E('em', {}, _('Loading…')) ]);
@@ -172,12 +211,14 @@ return view.extend({
 				L.resolveDefault(callStatus(), {}),
 				L.resolveDefault(callAdopted(), { nodes: [] }),
 				L.resolveDefault(callPending(), { nodes: [] }),
-				L.resolveDefault(callNodes(), { nodes: [] })
+				L.resolveDefault(callNodes(), { nodes: [] }),
+				L.resolveDefault(callClients(), { clients: [] })
 			]).then(function(d) {
 				container.innerHTML = '';
 				container.appendChild(self.renderStatus(d[0]));
 				container.appendChild(self.renderPending(d[2], ev));
 				container.appendChild(self.renderAdopted(d[1], d[3], ev));
+				container.appendChild(self.renderClients(d[4]));
 			});
 		};
 

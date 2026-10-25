@@ -51,6 +51,13 @@ static struct om_link *next_slot(struct om_monitor *m)
 	return &m->links[m->n_links++];
 }
 
+static struct om_sta *next_sta_slot(struct om_monitor *m)
+{
+	if (m->n_stas >= OM_MAX_STAS)
+		return NULL;
+	return &m->stas[m->n_stas++];
+}
+
 /* mesh interface names look like "phy1-mesh0" (iw) */
 static void poll_wifi_links(struct om_monitor *m)
 {
@@ -165,11 +172,100 @@ static void poll_batman_links(struct om_monitor *m)
 	pclose(p);
 }
 
+/*
+ * Associated stations on local AP interfaces. 24.10 iwinfo layout
+ * (verified on device, see docs/design/m16-clients.md):
+ *   <MAC>  -49 dBm / -92 dBm (SNR 43)  3630 ms ago
+ *     RX: 6.0 MBit/s ...
+ *     TX: 780.0 MBit/s ...
+ * AP ifaces show as "type AP" in iw dev (mesh peers are "type mesh"
+ * and use a different, per-field-line assoclist layout).
+ */
+static void poll_ap_clients(struct om_monitor *m)
+{
+	FILE *p = popen("iw dev 2>/dev/null | awk '/Interface/{i=$2} "
+			"/type AP/{print i}'", "r");
+	char ifname[32];
+	char cmd[128];
+
+	while (p && fgets(ifname, sizeof(ifname), p)) {
+		char ssid[33] = "";
+		char line[256];
+		FILE *a;
+		int cur = -1;
+
+		trim(ifname);
+		if (!*ifname)
+			continue;
+
+		snprintf(cmd, sizeof(cmd), "iwinfo %s info 2>/dev/null",
+			 ifname);
+		FILE *f = popen(cmd, "r");
+
+		while (f && fgets(line, sizeof(line), f)) {
+			char *q = strstr(line, "ESSID: \"");
+			char *end;
+
+			if (!q)
+				continue;
+			snprintf(ssid, sizeof(ssid), "%s", q + 8);
+			end = strchr(ssid, '"');
+			if (end)
+				*end = '\0';
+			break;
+		}
+		if (f)
+			pclose(f);
+
+		snprintf(cmd, sizeof(cmd), "iwinfo %s assoclist 2>/dev/null",
+			 ifname);
+		a = popen(cmd, "r");
+		if (!a)
+			continue;
+		while (fgets(line, sizeof(line), a)) {
+			char mac[20];
+			int rssi = 0;
+			double mb;
+
+			trim(line);
+			if (sscanf(line, "%19s %d dBm", mac, &rssi) >= 2 &&
+			    mac_ok(mac)) {
+				struct om_sta *s = next_sta_slot(m);
+
+				if (!s)
+					break;
+				memset(s, 0, sizeof(*s));
+				snprintf(s->mac, sizeof(s->mac), "%s", mac);
+				snprintf(s->ifname, sizeof(s->ifname), "%s",
+					 ifname);
+				snprintf(s->ssid, sizeof(s->ssid), "%s",
+					 ssid);
+				s->rssi = (int8_t)rssi;
+				s->seen = time(NULL);
+				cur = s - m->stas;
+			} else if (cur >= 0) {
+				if (sscanf(line, " RX: %lf MBit/s", &mb) == 1)
+					m->stas[cur].rx_rate =
+						(uint32_t)(mb * 1000);
+				else if (sscanf(line, " TX: %lf MBit/s",
+						&mb) == 1)
+					m->stas[cur].tx_rate =
+						(uint32_t)(mb * 1000);
+			}
+		}
+		pclose(a);
+	}
+	if (p)
+		pclose(p);
+}
+
 void om_monitor_poll(struct om_monitor *m)
 {
 	m->n_links = 0;
+	m->n_stas = 0;
 	m->mesh_ifname[0] = '\0';
 	m->last_poll = time(NULL);
 	poll_wifi_links(m);
 	poll_batman_links(m);
+	poll_ap_clients(m);
 }

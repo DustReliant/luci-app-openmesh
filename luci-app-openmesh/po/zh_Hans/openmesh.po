@@ -183,3 +183,18 @@ msgstr "等待对端（单节点）"
 
 msgid "Peer not managed by this controller"
 msgstr "不受本控制器管理的对端"
+
+msgid "Local clients"
+msgstr "本机客户端"
+
+msgid "MAC address"
+msgstr "MAC 地址"
+
+msgid "SSID"
+msgstr "SSID"
+
+msgid "No clients connected"
+msgstr "暂无客户端连接"
+
+msgid "Clients on this controller. Clients on mesh nodes appear after dual-node support."
+msgstr "本控制器上的客户端；mesh 节点上的客户端将在双机支持后显示。"
