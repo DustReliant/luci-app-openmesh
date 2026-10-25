@@ -18,6 +18,7 @@
 #include <libubox/ulog.h>
 
 #include "monitor.h"
+#include "batman_parse.h"
 #include "netconf.h"	/* OM_BAT_IF */
 
 static void trim(char *s)
@@ -120,105 +121,56 @@ static void poll_wifi_links(struct om_monitor *m)
 		fclose(p);
 }
 
+static void batman_link_sink(void *priv, const struct om_link *in)
+{
+	struct om_monitor *m = priv;
+	struct om_link *l = next_slot(m);
+
+	if (!l)
+		return;
+	*l = *in;
+	l->seen = time(NULL);
+}
+
 static void poll_batman_links(struct om_monitor *m)
 {
 	/*
-	 * r20 hardening (per architecture review):
-	 * - header line is validated against the expected column layout
-	 *   (Originator + (#/255) + Nexthop); unknown future formats abort
-	 *   the poll with a one-shot warning instead of mis-parsing data;
-	 * - malformed data rows are skipped (warned once per drift burst),
-	 *   never fatal: one bad originator must not take the daemon down.
+	 * r21: parsing lives in the pure unit batman_parse.c (host-tested
+	 * against the exact rows verified on hardware); this collector only
+	 * shells out, feeds the stream and translates outcomes to one-shot
+	 * warnings. batctl is wrapped in `timeout` so a wedged batctl
+	 * cannot stall the daemon (r21 acceptance item).
 	 */
 	static bool format_warned;
-	char cmd[96];
+	char cmd[104];
 	FILE *p;
-	char line[256];
-	bool header = true, header_seen = false;
-	unsigned parsed = 0, skipped = 0;
+	int parsed;
+	unsigned skipped = 0;
 
 	snprintf(cmd, sizeof(cmd),
-		 "batctl meshif %s originators -n > /tmp/.om_bat 2>/dev/null",
-		 OM_BAT_IF);
+		 "timeout 5 batctl meshif %s originators -n "
+		 "> /tmp/.om_bat 2>/dev/null", OM_BAT_IF);
 	system(cmd);
 	p = fopen("/tmp/.om_bat", "r");
 	if (!p)
 		return;
-	while (fgets(line, sizeof(line), p)) {
-		char mac[20], last[24], via[20], q[16];
-		double quality;
-		struct om_link *l;
-
-		trim(line);
-		if (header) {	/* skip banner until the column header */
-			if (strstr(line, "Originator")) {
-				header = false;
-				header_seen = true;
-				if (!strstr(line, "(#/255)") ||
-				    !strstr(line, "Nexthop")) {
-					if (!format_warned) {
-						ULOG_WARN("batctl: unknown "
-							  "originators header "
-							  "layout, poll "
-							  "skipped\n");
-						format_warned = true;
-					}
-					break;
-				}
-			}
-			continue;
-		}
-		/*
-		 * r19: batman-adv 2024.3 layout is
-		 *   [ *] MAC  last-seen (#/255) NEXTHOP [outgoingIF]
-		 * (data rows are indented; direct peers carry a leading
-		 * '*'). The old M9-era "mac last via q quality" sscanf
-		 * never matched -- untested on real originators until
-		 * dual-node bring-up.
-		 */
-		{
-			char *s = line;
-
-			while (*s == ' ' || *s == '\t')
-				s++;
-			if (*s == '*')
-				s++;
-			if (sscanf(s, "%19s %23s (%lf) %19s [%15s]",
-				   mac, last, &quality, via, q) < 3) {
-				skipped++;
-				continue;
-			}
-			{
-				size_t ql = strlen(q);
-
-				if (ql && q[ql - 1] == ']')
-					q[ql - 1] = '\0';
-			}
-		}
-		if (!mac_ok(mac)) {
-			skipped++;
-			continue;
-		}
-		/* direct (single-hop) originators legitimately have
-		 * nexthop == originator; own entries are not listed */
-		l = next_slot(m);
-		if (!l)
-			break;
-		memset(l, 0, sizeof(*l));
-		l->type = OM_LINK_BATMAN;
-		snprintf(l->peer, sizeof(l->peer), "%s", mac);
-		snprintf(l->via, sizeof(l->via), "%s", q[0] ? q : via);
-		l->seen = time(NULL);
-		parsed++;
-	}
+	parsed = om_batman_parse(p, batman_link_sink, m, &skipped);
 	fclose(p);
-	if (header_seen && skipped && !parsed && !format_warned) {
+	if (parsed < 0 && !format_warned) {
+		ULOG_WARN("batctl: unknown originators header layout, "
+			  "poll skipped\n");
+		format_warned = true;
+		return;
+	}
+	if (parsed > 0) {
+		format_warned = false;
+		return;
+	}
+	if (skipped && !format_warned) {
 		ULOG_WARN("batctl: %u originator rows failed to parse, "
 			  "layout may have changed\n", skipped);
 		format_warned = true;
 	}
-	if (parsed)
-		format_warned = false;
 }
 
 /*

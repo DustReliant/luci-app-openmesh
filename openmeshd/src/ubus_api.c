@@ -19,6 +19,7 @@
 #include "netconf.h"
 #include "store.h"
 #include "monitor.h"
+#include "topology.h"
 
 
 static struct blob_buf b;
@@ -402,6 +403,124 @@ static int om_get_clients(struct ubus_context *ctx, struct ubus_object *obj,
 	return ubus_send_reply(ctx, req, b.head);
 }
 
+/*
+ * m18 Phase 3: unified topology snapshot. Assembles neutral inputs from
+ * identity (controller), adopted store + discovery (agents) and the
+ * monitor link table, delegates to the pure om_topology_build() and
+ * serializes. Frontends consume this -- never batctl/iwinfo output.
+ */
+static int om_topology(struct ubus_context *ctx, struct ubus_object *obj,
+		       struct ubus_request_data *req, const char *method,
+		       struct blob_attr *msg)
+{
+	struct om_ubus *u = OM_HANDLER_CTX(obj);
+	struct om_topo_in_node in[OM_TOPO_MAX_NODES];
+	struct om_topology topo;
+	char ctrl_hex[OM_ID_HEX_LEN];
+	struct timespec now;
+	unsigned n_in = 0;
+	void *an, *al;
+
+	(void)method;
+	(void)msg;
+	memset(in, 0, sizeof(in));
+	memset(&topo, 0, sizeof(topo));
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	om_id_to_hex(u->id->id, ctrl_hex);
+
+	/* controller self */
+	in[n_in].id = ctrl_hex;
+	in[n_in].hostname = "controller";
+	in[n_in].role = "controller";
+	in[n_in].online = true;
+	in[n_in].uptime = (uint32_t)(now.tv_sec - u->started.tv_sec);
+	in[n_in].client_count = u->mon ? u->mon->n_stas : 0;
+	n_in++;
+
+	/* adopted agents, enriched from the discovery table (model/ip/mac) */
+	if (u->snet)
+		for (unsigned i = 0; i < u->snet->n_adopted &&
+				    n_in < OM_TOPO_MAX_NODES; i++) {
+			const struct om_adopted_node *a = &u->snet->adopted[i];
+			char hex[OM_ID_HEX_LEN];
+
+			om_id_to_hex(a->id, hex);
+			in[n_in].id = strdup(hex);
+			in[n_in].hostname = a->name;
+			in[n_in].role = "agent";
+			in[n_in].online = a->online;
+			in[n_in].last_seen = (uint32_t)a->last_seen;
+			for (unsigned d = 0; d < u->disc->n_nodes; d++)
+				if (!memcmp(u->disc->nodes[d].id, a->id,
+					    OM_ID_LEN)) {
+					const struct om_node_info *nd =
+						&u->disc->nodes[d];
+
+					in[n_in].model = nd->model;
+					in[n_in].ip = nd->addr;
+					in[n_in].mac = nd->mac;
+					break;
+				}
+			n_in++;
+		}
+
+	om_topology_build(in, n_in, u->mon ? u->mon->links : NULL,
+			  u->mon ? u->mon->n_links : 0, time(NULL), &topo);
+	for (unsigned i = 1; i < n_in; i++)
+		free((void *)in[i].id);
+
+	blob_buf_init(&b, 0);
+	blobmsg_add_u32(&b, "timestamp", topo.timestamp);
+	an = blobmsg_open_array(&b, "nodes");
+	for (unsigned i = 0; i < topo.n_nodes; i++) {
+		const struct om_topo_node *n = &topo.nodes[i];
+		void *t = blobmsg_open_table(&b, NULL);
+
+		blobmsg_add_string(&b, "id", n->id);
+		blobmsg_add_string(&b, "hostname", n->hostname);
+		if (n->model[0])
+			blobmsg_add_string(&b, "model", n->model);
+		if (n->ip[0])
+			blobmsg_add_string(&b, "ip", n->ip);
+		if (n->mac[0])
+			blobmsg_add_string(&b, "mac", n->mac);
+		blobmsg_add_string(&b, "role", n->role);
+		blobmsg_add_string(&b, "status", n->status);
+		if (n->uptime)
+			blobmsg_add_u32(&b, "uptime", n->uptime);
+		if (n->client_count)
+			blobmsg_add_u32(&b, "client_count", n->client_count);
+		if (n->last_seen)
+			blobmsg_add_u32(&b, "last_seen", n->last_seen);
+		blobmsg_close_table(&b, t);
+	}
+	blobmsg_close_array(&b, an);
+	al = blobmsg_open_array(&b, "links");
+	for (unsigned i = 0; i < topo.n_links; i++) {
+		const struct om_topo_link *l = &topo.links[i];
+		void *t = blobmsg_open_table(&b, NULL);
+
+		blobmsg_add_string(&b, "id", l->id);
+		blobmsg_add_string(&b, "source", l->source);
+		blobmsg_add_string(&b, "target", l->target);
+		blobmsg_add_string(&b, "type", l->type);
+		blobmsg_add_string(&b, "status", l->status);
+		if (l->interface[0])
+			blobmsg_add_string(&b, "interface", l->interface);
+		if (l->tq)
+			blobmsg_add_u32(&b, "tq", l->tq);
+		if (l->rssi)
+			blobmsg_add_u32(&b, "rssi", (uint32_t)l->rssi);
+		if (l->tx_rate)
+			blobmsg_add_u32(&b, "tx_rate", l->tx_rate);
+		if (l->last_seen)
+			blobmsg_add_u32(&b, "last_seen", l->last_seen);
+		blobmsg_close_table(&b, t);
+	}
+	blobmsg_close_array(&b, al);
+	return ubus_send_reply(ctx, req, b.head);
+}
+
 static int om_get_mesh_info(struct ubus_context *ctx, struct ubus_object *obj,
 			    struct ubus_request_data *req, const char *method,
 			    struct blob_attr *msg)
@@ -482,6 +601,7 @@ static const struct ubus_method om_methods[] = {
 	UBUS_METHOD_NOARG("apply_rollback", om_apply_rollback),
 	UBUS_METHOD_NOARG("get_links", om_get_links),
 	UBUS_METHOD_NOARG("get_clients", om_get_clients),
+	UBUS_METHOD_NOARG("topology", om_topology),
 	UBUS_METHOD_NOARG("get_mesh_info", om_get_mesh_info),
 	UBUS_METHOD("roaming_apply", om_roaming_apply, om_roam_policy),
 };

@@ -20,6 +20,7 @@ struct om_link {
 	char ifname[16];
 	char peer[20];		/* MAC (colon format) */
 	int8_t rssi;		/* dBm, 0 = unknown */
+	uint8_t tq;		/* batman TQ 0..255, 0 = unknown */
 	uint32_t tx_rate;	/* kbit/s, 0 = unknown */
 	char via[16];		/* batman hardif */
 	time_t seen;

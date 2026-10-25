@@ -74,6 +74,18 @@ cc $CFLAGS_extra -I"$SRC" -I"$BUILD" -Wall -Wextra -std=c11 \
 
 # shellcheck disable=SC2086
 cc $CFLAGS_extra -I"$SRC" -I"$BUILD" -Wall -Wextra -std=c11 \
+	-o "$BUILD/test_batman" \
+	"$REPO/tests/test_batman.c" "$SRC/batman_parse.c"
+"$BUILD/test_batman"
+
+# shellcheck disable=SC2086
+cc $CFLAGS_extra -I"$SRC" -I"$BUILD" -Wall -Wextra -std=c11 \
+	-o "$BUILD/test_topology" \
+	"$REPO/tests/test_topology.c" "$SRC/topology.c"
+"$BUILD/test_topology"
+
+# shellcheck disable=SC2086
+cc $CFLAGS_extra -I"$SRC" -I"$BUILD" -Wall -Wextra -std=c11 \
 	-o "$BUILD/test_discovery" \
 	"$REPO/tests/test_discovery.c" "$SRC/identity.c" "$SRC/discovery.c" \
 	$LDLIBS_extra
