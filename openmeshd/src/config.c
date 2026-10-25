@@ -139,6 +139,9 @@ int om_main_load(struct om_main_cfg *m)
 		if ((o = uci_lookup_option(c, s, "announce_interval")) &&
 		    o->type == UCI_TYPE_STRING)
 			m->interval = atoi(o->v.string);
+		if ((o = uci_lookup_option(c, s, "batctl_timeout")) &&
+		    o->type == UCI_TYPE_STRING)
+			m->batctl_timeout = (unsigned)atoi(o->v.string);
 		if ((o = uci_lookup_option(c, s, "announce_port")) &&
 		    o->type == UCI_TYPE_STRING)
 			m->port = atoi(o->v.string);

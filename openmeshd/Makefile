@@ -49,6 +49,7 @@ define Build/Compile
 		$(PKG_BUILD_DIR)/netconf.c \
 		$(PKG_BUILD_DIR)/monitor.c \
 		$(PKG_BUILD_DIR)/batman_parse.c \
+		$(PKG_BUILD_DIR)/batman_collect.c \
 		$(PKG_BUILD_DIR)/topology.c \
 		$(TARGET_LDFLAGS) -lubox -lubus -lblobmsg_json -lsodium -luci
 endef

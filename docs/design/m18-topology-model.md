@@ -31,3 +31,11 @@
 ## 下一阶段（Phase 4+，未开工）
 
 ubus topology → LuCI 拓扑页消费（现有 M15 双视图页保留并行）→ 无限画布/拖拽/缩放/自动布局/布局持久化（TopologyLayout 独立结构）→ 实时更新（先 polling；事件订阅接口已预留语义）。
+
+## Phase 1/2 最终验收（r21b，2026-10-26）
+
+- **分层落地**：`batman_collect.c`（执行层：跑 batctl、可配置超时、不解释任何字节）∥ `batman_parse.c`（纯解析：字符串入/FILE 入双入口、零运行时依赖、不执行命令/不碰文件/不识 ubus/UCI）。fixture 真机采集存 `tests/fixtures/`。
+- **超时防御**（唯一确认缺失项）：UCI `openmesh.main.batctl_timeout`（默认 2s、钳位 1..30）→ `timeout` 杀卡死 batctl；system() 收割 shell 零僵尸；主循环最坏停顿=超时值（batctl 正常 <50ms；全异步需重构已验证的 monitor 循环，明确不做，见"剩余风险"）。
+- **COLLECT_FAILED ≠ 离线**：采集失败时 monitor **内存保留**最近已知 batman 链路 90s（`batman_stage`），`get_links` 新增 `batman_collect: ok|stale|failed`（增量字段，LuCI 无感）；节点在线状态来自会话层，与采集完全解耦。日志策略=状态迁移一次性告警（失败 WARN/恢复 NOTE），不刷屏。注意：shell 重定向会先截断传输文件，故保留只能在内存——命令层测试固化了该契约。
+- **测试**：parser 16 场景（含 CRLF/异常空白/消失恢复/12 行批量/字符串 API 等价性）+ 命令层 3 场景（假 batctl：成功复放 fixture/挂死被杀/命令缺失 + 僵尸检查 + 超时界 2s）。
+- **真机回归 vs r20/0967c98 基线**：get_links（wifi -27/batman via）、topology（双节点/tq 231/interface）、M9→M10 与 M10→M9 originators 全部一致；唯一差异=新增 `batman_collect` 字段（设计内增量）。

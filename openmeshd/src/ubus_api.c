@@ -343,6 +343,18 @@ static int om_get_links(struct ubus_context *ctx, struct ubus_object *obj,
 	(void)method;
 	(void)msg;
 	blob_buf_init(&b, 0);
+	/* r21b: collection health -- distinguishes COLLECT_FAILED from real
+	 * link loss. ok = fresh batman data; stale = collect failed, rows
+	 * retained (<90s); failed = collect failed, retention expired.
+	 * Absent when no monitor is attached. */
+	if (u->mon) {
+		const char *h = "ok";
+
+		if (u->mon->batman_failed)
+			h = (time(NULL) - u->mon->batman_last_ok <=
+			     OM_BATMAN_RETAIN_S) ? "stale" : "failed";
+		blobmsg_add_string(&b, "batman_collect", h);
+	}
 	a = blobmsg_open_array(&b, "links");
 	if (u->mon)
 		for (unsigned i = 0; i < u->mon->n_links; i++) {

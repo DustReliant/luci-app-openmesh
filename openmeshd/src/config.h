@@ -13,6 +13,8 @@ struct om_main_cfg {
 	char mac[18];		/* primary (br-lan) MAC, "" if unknown */
 	char controller_addr[48];	/* agent: controller ip[:port] */
 	int interval;		/* announce interval, seconds */
+	unsigned batctl_timeout;	/* batctl collection timeout, seconds
+					 * (0 = default, see batman_collect.h) */
 	int port;		/* announce/listen port */
 	int session_port;	/* controller session port (default 7688) */
 };

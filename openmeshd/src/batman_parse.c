@@ -98,3 +98,19 @@ int om_batman_parse(FILE *p, om_link_sink sink, void *priv,
 		*skipped = bad;
 	return (int)parsed;
 }
+
+int om_batman_parse_text(const char *text, om_link_sink sink, void *priv,
+			 unsigned *skipped)
+{
+	FILE *f = fmemopen((void *)text, strlen(text), "r");
+	int rc;
+
+	if (!f) {
+		if (skipped)
+			*skipped = 0;
+		return 0;
+	}
+	rc = om_batman_parse(f, sink, priv, skipped);
+	fclose(f);
+	return rc;
+}

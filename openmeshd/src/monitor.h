@@ -3,11 +3,14 @@
 #define OPENMESH_MONITOR_H
 
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
 
 #define OM_MAX_LINKS 16
 #define OM_MAX_STAS 32
+#define OM_BATMAN_RETAIN_S 90	/* keep last-known batman links this long
+				 * after a failed collection */
 
 enum om_link_type {
 	OM_LINK_WIFI = 0,	/* 802.11s peer station */
@@ -40,6 +43,14 @@ struct om_sta {
 struct om_monitor {
 	struct om_link links[OM_MAX_LINKS];
 	unsigned n_links;
+	/* batman staging + retention (r21b): a failed collection must
+	 * never report "links gone" -- last-known batman links are kept
+	 * for OM_BATMAN_RETAIN_S and flagged stale via batman_collect */
+	struct om_link batman_stage[OM_MAX_LINKS];
+	unsigned n_batman_stage;
+	time_t batman_last_ok;
+	bool batman_failed;	/* collection health, NOT node health */
+	unsigned batctl_timeout;	/* seconds, UCI-configurable */
 	struct om_sta stas[OM_MAX_STAS];
 	unsigned n_stas;
 	time_t last_poll;

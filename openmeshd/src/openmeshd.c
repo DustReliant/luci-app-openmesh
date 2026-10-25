@@ -196,6 +196,7 @@ int main(int argc, char **argv)
 
 	memset(&dc, 0, sizeof(dc));
 	dc.interval = mc.interval;
+	mon.batctl_timeout = mc.batctl_timeout;
 	dc.listen_port = opt_listen_port ? opt_listen_port : mc.port;
 	dc.dest_port = opt_dest_port ? opt_dest_port : dc.listen_port;
 	snprintf(dc.dest_addr, sizeof(dc.dest_addr), "%s", opt_dest_addr);

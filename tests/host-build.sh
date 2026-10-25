@@ -78,6 +78,12 @@ cc $CFLAGS_extra -I"$SRC" -I"$BUILD" -Wall -Wextra -std=c11 \
 	"$REPO/tests/test_batman.c" "$SRC/batman_parse.c"
 "$BUILD/test_batman"
 
+# command-layer harness + shell tests (fake batctl, PATH injection)
+cc $CFLAGS_extra -I"$SRC" -I"$BUILD" -Wall -Wextra -std=c11 \
+	-o "$BUILD/test_batman_collect" \
+	"$REPO/tests/test_batman_collect.c" "$SRC/batman_collect.c"
+"$REPO/tests/test_batman_cmdlayer.sh"
+
 # shellcheck disable=SC2086
 cc $CFLAGS_extra -I"$SRC" -I"$BUILD" -Wall -Wextra -std=c11 \
 	-o "$BUILD/test_topology" \

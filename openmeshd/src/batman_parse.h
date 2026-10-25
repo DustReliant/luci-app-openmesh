@@ -31,4 +31,10 @@ typedef void (*om_link_sink)(void *priv, const struct om_link *l);
 int om_batman_parse(FILE *p, om_link_sink sink, void *priv,
 		    unsigned *skipped);
 
+/* string-input variant (fmemopen-backed): parse_originators(text) ->
+ * structured records via sink. The parser executes nothing, touches no
+ * files, knows no ubus/UCI -- pure text in, links out. */
+int om_batman_parse_text(const char *text, om_link_sink sink, void *priv,
+			 unsigned *skipped);
+
 #endif /* OPENMESH_BATMAN_PARSE_H */

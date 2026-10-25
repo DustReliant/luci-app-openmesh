@@ -19,6 +19,7 @@
 
 #include "monitor.h"
 #include "batman_parse.h"
+#include "batman_collect.h"
 #include "netconf.h"	/* OM_BAT_IF */
 
 static void trim(char *s)
@@ -121,55 +122,73 @@ static void poll_wifi_links(struct om_monitor *m)
 		fclose(p);
 }
 
-static void batman_link_sink(void *priv, const struct om_link *in)
+/* staging sink: parsed rows land in the batman staging table; they are
+ * merged into the live link table only after a healthy collection */
+static void batman_stage_sink(void *priv, const struct om_link *in)
 {
 	struct om_monitor *m = priv;
-	struct om_link *l = next_slot(m);
 
-	if (!l)
+	if (m->n_batman_stage >= OM_MAX_LINKS)
 		return;
-	*l = *in;
-	l->seen = time(NULL);
+	m->batman_stage[m->n_batman_stage] = *in;
+	m->batman_stage[m->n_batman_stage++].seen = time(NULL);
 }
 
+/*
+ * r21b acceptance: execute layer (om_batman_collect, bounded by the
+ * UCI-configurable timeout) is separated from the pure parser. A failed
+ * collection is COLLECT_FAILED, never "link gone": last-known batman
+ * links are retained OM_BATMAN_RETAIN_S seconds and the snapshot flags
+ * batman_collect=stale|failed so consumers can tell collection trouble
+ * from real network change. Node online/offline is session-derived and
+ * untouched by any of this. Warnings fire on state transitions only
+ * (fail -> one WARN, recovery -> one NOTE), no log spam.
+ */
 static void poll_batman_links(struct om_monitor *m)
 {
-	/*
-	 * r21: parsing lives in the pure unit batman_parse.c (host-tested
-	 * against the exact rows verified on hardware); this collector only
-	 * shells out, feeds the stream and translates outcomes to one-shot
-	 * warnings. batctl is wrapped in `timeout` so a wedged batctl
-	 * cannot stall the daemon (r21 acceptance item).
-	 */
 	static bool format_warned;
-	char cmd[104];
 	FILE *p;
 	int parsed;
 	unsigned skipped = 0;
 
-	snprintf(cmd, sizeof(cmd),
-		 "timeout 5 batctl meshif %s originators -n "
-		 "> /tmp/.om_bat 2>/dev/null", OM_BAT_IF);
-	system(cmd);
+	if (om_batman_collect(OM_BAT_IF,
+			      m->batctl_timeout ?: OM_BATCTL_TIMEOUT_DEFAULT,
+			      "/tmp/.om_bat") < 0) {
+		if (!m->batman_failed) {
+			ULOG_WARN("batctl: collection failed/timeout "
+				  "(timeout=%us), retaining last-known "
+				  "links\n",
+				  m->batctl_timeout ?:
+				  OM_BATCTL_TIMEOUT_DEFAULT);
+			m->batman_failed = true;
+		}
+		return;
+	}
+	m->n_batman_stage = 0;	/* collect ok: stage is rebuilt fresh */
 	p = fopen("/tmp/.om_bat", "r");
 	if (!p)
 		return;
-	parsed = om_batman_parse(p, batman_link_sink, m, &skipped);
+	parsed = om_batman_parse(p, batman_stage_sink, m, &skipped);
 	fclose(p);
-	if (parsed < 0 && !format_warned) {
-		ULOG_WARN("batctl: unknown originators header layout, "
-			  "poll skipped\n");
-		format_warned = true;
-		return;
+	if (parsed < 0) {
+		if (!format_warned) {
+			ULOG_WARN("batctl: unknown originators header "
+				  "layout, poll skipped\n");
+			format_warned = true;
+		}
+		return;		/* format change == collection failure too */
 	}
-	if (parsed > 0) {
-		format_warned = false;
-		return;
-	}
-	if (skipped && !format_warned) {
+	if (skipped && !parsed && !format_warned) {
 		ULOG_WARN("batctl: %u originator rows failed to parse, "
 			  "layout may have changed\n", skipped);
 		format_warned = true;
+		return;
+	}
+	format_warned = false;
+	m->batman_last_ok = time(NULL);
+	if (m->batman_failed) {
+		m->batman_failed = false;
+		ULOG_NOTE("batctl: collection recovered\n");
 	}
 }
 
@@ -262,11 +281,21 @@ static void poll_ap_clients(struct om_monitor *m)
 
 void om_monitor_poll(struct om_monitor *m)
 {
+	time_t now = time(NULL);
+
 	m->n_links = 0;
 	m->n_stas = 0;
 	m->mesh_ifname[0] = '\0';
-	m->last_poll = time(NULL);
+	m->last_poll = now;
 	poll_wifi_links(m);
 	poll_batman_links(m);
+	/* merge batman stage: fresh rows on success; on COLLECT_FAILED keep
+	 * last-known rows for OM_BATMAN_RETAIN_S (flagged via
+	 * om_monitor_batman_health()), then drop -- never a silent wipe */
+	if (!m->batman_failed ||
+	    now - m->batman_last_ok <= OM_BATMAN_RETAIN_S)
+		for (unsigned i = 0; i < m->n_batman_stage &&
+			     m->n_links < OM_MAX_LINKS; i++)
+			m->links[m->n_links++] = m->batman_stage[i];
 	poll_ap_clients(m);
 }
