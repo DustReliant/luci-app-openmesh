@@ -122,10 +122,20 @@ static void poll_wifi_links(struct om_monitor *m)
 
 static void poll_batman_links(struct om_monitor *m)
 {
+	/*
+	 * r20 hardening (per architecture review):
+	 * - header line is validated against the expected column layout
+	 *   (Originator + (#/255) + Nexthop); unknown future formats abort
+	 *   the poll with a one-shot warning instead of mis-parsing data;
+	 * - malformed data rows are skipped (warned once per drift burst),
+	 *   never fatal: one bad originator must not take the daemon down.
+	 */
+	static bool format_warned;
 	char cmd[96];
 	FILE *p;
 	char line[256];
-	bool header = true;
+	bool header = true, header_seen = false;
+	unsigned parsed = 0, skipped = 0;
 
 	snprintf(cmd, sizeof(cmd),
 		 "batctl meshif %s originators -n > /tmp/.om_bat 2>/dev/null",
@@ -137,13 +147,25 @@ static void poll_batman_links(struct om_monitor *m)
 	while (fgets(line, sizeof(line), p)) {
 		char mac[20], last[24], via[20], q[16];
 		double quality;
-		unsigned rate_kbps = 0;
 		struct om_link *l;
 
 		trim(line);
-		if (header) {	/* skip legend lines */
-			if (strstr(line, "Originator"))
+		if (header) {	/* skip banner until the column header */
+			if (strstr(line, "Originator")) {
 				header = false;
+				header_seen = true;
+				if (!strstr(line, "(#/255)") ||
+				    !strstr(line, "Nexthop")) {
+					if (!format_warned) {
+						ULOG_WARN("batctl: unknown "
+							  "originators header "
+							  "layout, poll "
+							  "skipped\n");
+						format_warned = true;
+					}
+					break;
+				}
+			}
 			continue;
 		}
 		/*
@@ -162,8 +184,10 @@ static void poll_batman_links(struct om_monitor *m)
 			if (*s == '*')
 				s++;
 			if (sscanf(s, "%19s %23s (%lf) %19s [%15s]",
-				   mac, last, &quality, via, q) < 3)
+				   mac, last, &quality, via, q) < 3) {
+				skipped++;
 				continue;
+			}
 			{
 				size_t ql = strlen(q);
 
@@ -171,8 +195,10 @@ static void poll_batman_links(struct om_monitor *m)
 					q[ql - 1] = '\0';
 			}
 		}
-		if (!mac_ok(mac))
+		if (!mac_ok(mac)) {
+			skipped++;
 			continue;
+		}
 		/* direct (single-hop) originators legitimately have
 		 * nexthop == originator; own entries are not listed */
 		l = next_slot(m);
@@ -182,10 +208,17 @@ static void poll_batman_links(struct om_monitor *m)
 		l->type = OM_LINK_BATMAN;
 		snprintf(l->peer, sizeof(l->peer), "%s", mac);
 		snprintf(l->via, sizeof(l->via), "%s", q[0] ? q : via);
-		l->tx_rate = rate_kbps;
 		l->seen = time(NULL);
+		parsed++;
 	}
-	pclose(p);
+	fclose(p);
+	if (header_seen && skipped && !parsed && !format_warned) {
+		ULOG_WARN("batctl: %u originator rows failed to parse, "
+			  "layout may have changed\n", skipped);
+		format_warned = true;
+	}
+	if (parsed)
+		format_warned = false;
 }
 
 /*
