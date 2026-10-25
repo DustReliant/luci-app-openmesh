@@ -122,6 +122,8 @@ static void load_file(const char *path, uint8_t *buf, size_t len)
 
 /* ---------- keepalive / timeouts ---------- */
 
+static void agent_down(struct om_snet *s, bool schedule);
+
 static void ctrl_ka_timer_cb(struct uloop_timeout *t)
 {
 	struct om_snet_peer *p = container_of(t, struct om_snet_peer, timer);
@@ -162,6 +164,22 @@ static void agent_hs_timer_cb(struct uloop_timeout *t)
 	}
 	s->backoff = s->agent_adopted ? 10 : 5;
 	uloop_timeout_set(&s->retry, s->backoff * 1000);
+}
+
+/* M17: established agents must swap the handshake timeout for a
+ * dead-peer check; leaving agent_hs_timer_cb armed killed every
+ * session 10s after ESTABLISHED (the 20s flap: kill + 10s backoff). */
+static void agent_ka_timer_cb(struct uloop_timeout *t)
+{
+	struct om_snet_peer *p = container_of(t, struct om_snet_peer, timer);
+	struct om_snet *s = p->s;
+
+	if (p->state != PS_ESTABLISHED ||
+	    time(NULL) - p->last_rx > OM_KA_DEAD) {
+		agent_down(s, true);
+		return;
+	}
+	uloop_timeout_set(t, OM_KA_PERIOD * 1000);
 }
 
 /* ---------- controller ---------- */
@@ -502,6 +520,9 @@ static void agent_rx_cb(struct uloop_fd *fd, unsigned int events)
 			ULOG_NOTE("session: adopted by controller %.16s..\n",
 				  hex);
 			s->backoff = 0;
+			uloop_timeout_cancel(&p->timer);
+			p->timer.cb = agent_ka_timer_cb;
+			uloop_timeout_set(&p->timer, OM_KA_PERIOD * 1000);
 			if (s->on_agent_state)
 				s->on_agent_state(s, true, s->agent_priv);
 			return;
@@ -527,6 +548,9 @@ static void agent_rx_cb(struct uloop_fd *fd, unsigned int events)
 			s->agent_adopted = true;
 			p->state = PS_ESTABLISHED;
 			s->backoff = 0;
+			uloop_timeout_cancel(&p->timer);
+			p->timer.cb = agent_ka_timer_cb;
+			uloop_timeout_set(&p->timer, OM_KA_PERIOD * 1000);
 			if (s->on_agent_state)
 				s->on_agent_state(s, true, s->agent_priv);
 			return;
