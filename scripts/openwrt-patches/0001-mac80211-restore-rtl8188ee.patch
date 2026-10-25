@@ -1,0 +1,43 @@
+diff --git a/package/kernel/mac80211/Makefile b/package/kernel/mac80211/Makefile
+index e5b9459ddf..91fe0b8255 100644
+--- a/package/kernel/mac80211/Makefile
++++ b/package/kernel/mac80211/Makefile
+@@ -27,6 +27,7 @@ PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
+ PKG_DRIVERS = \
+ 	mac80211-hwsim \
+ 	mt7601u \
++	rtl8188ee \
+ 	rsi91x rsi91x-usb rsi91x-sdio\
+ 	wlcore wl12xx wl18xx
+ 
+@@ -209,6 +210,22 @@ define KernelPackage/rsi91x-sdio
+ endef
+ 
+ 
++define KernelPackage/rtl8188ee
++  $(call KernelPackage/mac80211/Default)
++  TITLE:=Realtek RTL8188EE PCIe wireless adapter
++  DEPENDS+= +kmod-mac80211
++  FILES:= \
++	$(PKG_BUILD_DIR)/drivers/net/wireless/realtek/rtlwifi/rtlwifi.ko \
++	$(PKG_BUILD_DIR)/drivers/net/wireless/realtek/rtlwifi/rtl_pci.ko \
++	$(PKG_BUILD_DIR)/drivers/net/wireless/realtek/rtlwifi/rtl8188ee/rtl8188ee.ko
++  AUTOLOAD:=$(call AutoProbe,rtl8188ee)
++endef
++
++define KernelPackage/rtl8188ee/description
++ Kernel modules for the Realtek RTL8188EE 2.4G PCIe adapter
++ (rtlwifi core + pci bus + 8188ee chip in one package).
++endef
++
+ define KernelPackage/wlcore
+   $(call KernelPackage/mac80211/Default)
+   TITLE:=TI common driver part
+@@ -267,6 +284,7 @@ config-y += WL_MEDIATEK
+ 
+ config-$(call config_package,wlcore) += WLCORE WLCORE_SDIO
+ config-$(call config_package,wl12xx) += WL12XX
++config-$(call config_package,rtl8188ee) += RTLWIFI RTLWIFI_PCI RTL8188EE
+ config-$(call config_package,wl18xx) += WL18XX
+ config-y += WL_TI WILINK_PLATFORM_DATA
+ config-$(call config_package,rsi91x) += RSI_91X
