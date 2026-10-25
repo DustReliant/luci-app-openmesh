@@ -7,6 +7,7 @@
 #include <time.h>
 
 #define OM_MAX_LINKS 16
+#define OM_MAX_STAS 32
 
 enum om_link_type {
 	OM_LINK_WIFI = 0,	/* 802.11s peer station */
@@ -24,9 +25,22 @@ struct om_link {
 	time_t seen;
 };
 
+/* associated station on a local AP interface */
+struct om_sta {
+	char mac[20];		/* MAC (colon format) */
+	char ifname[16];
+	char ssid[33];		/* may be empty */
+	int8_t rssi;		/* dBm, 0 = unknown */
+	uint32_t rx_rate;	/* kbit/s, 0 = unknown */
+	uint32_t tx_rate;	/* kbit/s, 0 = unknown */
+	time_t seen;
+};
+
 struct om_monitor {
 	struct om_link links[OM_MAX_LINKS];
 	unsigned n_links;
+	struct om_sta stas[OM_MAX_STAS];
+	unsigned n_stas;
 	time_t last_poll;
 	char mesh_ifname[16];	/* last seen 802.11s iface, "" = none */
 };
