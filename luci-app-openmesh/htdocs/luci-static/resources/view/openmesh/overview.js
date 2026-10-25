@@ -193,6 +193,18 @@ return view.extend({
 		var self = this;
 		var container = E('div', {}, [ E('em', {}, _('Loading…')) ]);
 
+		/* agent nodes have no openmesh ubus object (controller-only RPC,
+		 * by design): show a pointer to the controller instead of
+		 * misleading empty tables */
+		if (!data[0] || !data[0].node_id)
+			return E('div', { 'class': 'cbi-section' }, [
+				E('h3', {}, _('OpenMesh agent node')),
+				E('p', {},
+					_('This device runs as a mesh agent (or the openmeshd service is unreachable).')),
+				E('p', { 'style': 'color:#666' },
+					_('Discovery, adoption, mesh topology and client lists are managed from the controller. Open the OpenMesh pages there.'))
+			]);
+
 		var ev = function(fn) {
 			return function() {
 				try {

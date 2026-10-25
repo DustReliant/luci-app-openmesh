@@ -198,3 +198,15 @@ msgstr "暂无客户端连接"
 
 msgid "Clients on this controller. Clients on mesh nodes appear after dual-node support."
 msgstr "本控制器上的客户端；mesh 节点上的客户端将在双机支持后显示。"
+
+msgid "OpenMesh agent node"
+msgstr "OpenMesh 代理节点"
+
+msgid "This device runs as a mesh agent (or the openmeshd service is unreachable)."
+msgstr "本设备以 mesh 代理模式运行（或 openmeshd 服务不可达）。"
+
+msgid "Discovery, adoption, mesh topology and client lists are managed from the controller. Open the OpenMesh pages there."
+msgstr "发现、领养、mesh 拓扑与客户端列表均在控制器上管理，请打开控制器上的 OpenMesh 页面。"
+
+msgid "Mesh topology is rendered on the controller. Open the OpenMesh pages there."
+msgstr "mesh 拓扑在控制器上呈现，请打开控制器上的 OpenMesh 页面。"

@@ -319,6 +319,15 @@ return view.extend({
 		var tabs = E('ul', { 'class': 'cbi-tabmenu cbi-tabmenu-network' });
 		var body = E('div');
 
+		if (!data[0] || !data[0].node_id)
+			return E('div', { 'class': 'cbi-section' }, [
+				E('h3', {}, _('OpenMesh agent node')),
+				E('p', {},
+					_('This device runs as a mesh agent (or the openmeshd service is unreachable).')),
+				E('p', { 'style': 'color:#666' },
+					_('Mesh topology is rendered on the controller. Open the OpenMesh pages there.'))
+			]);
+
 		this.mode = this.mode || 'net';
 
 		function renderTabs() {
