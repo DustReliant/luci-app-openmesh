@@ -25,7 +25,7 @@ struct om_link {
 	int8_t rssi;		/* dBm, 0 = unknown */
 	uint8_t tq;		/* batman TQ 0..255, 0 = unknown */
 	uint32_t tx_rate;	/* kbit/s, 0 = unknown */
-	char via[16];		/* batman hardif */
+	char via[20];		/* batman nexthop MAC (==peer for direct) */
 	time_t seen;
 };
 

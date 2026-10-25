@@ -89,7 +89,8 @@ int om_batman_parse(FILE *p, om_link_sink sink, void *priv,
 		memset(&l, 0, sizeof(l));
 		l.type = OM_LINK_BATMAN;
 		snprintf(l.peer, sizeof(l.peer), "%s", mac);
-		snprintf(l.via, sizeof(l.via), "%s", q[0] ? q : via);
+		snprintf(l.ifname, sizeof(l.ifname), "%s", q);
+		snprintf(l.via, sizeof(l.via), "%s", via);
 		l.tq = quality > 255 ? 255 : (uint8_t)quality;
 		sink(priv, &l);
 		parsed++;

@@ -66,7 +66,8 @@ int main(void)
 		     " * ec:2e:98:d2:71:28    0.900s   (231) ec:2e:98:d2:71:28 [phy0-mesh0]\n",
 		     1, 0, 1);
 	if (strcmp(captured[0].peer, "ec:2e:98:d2:71:28") ||
-	    captured[0].tq != 231 || strcmp(captured[0].via, "phy0-mesh0") ||
+	    captured[0].tq != 231 || strcmp(captured[0].via, "ec:2e:98:d2:71:28") ||
+	    strcmp(captured[0].ifname, "phy0-mesh0") ||
 	    captured[0].type != OM_LINK_BATMAN) {
 		printf("FAIL field-check: peer=%s tq=%u via=%s\n",
 		       captured[0].peer, captured[0].tq, captured[0].via);

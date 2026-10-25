@@ -124,7 +124,7 @@ int main(void)
 			"EC:2E:98:D2:71:28", "phy0-mesh0", 200, 0); /* dup */
 		om_topology_build(nodes, 2, links, 3, 1, &t);
 		CHECK(t.n_links == 2, "wifi+batman-mix-dedup");
-		CHECK(!strcmp(t.links[0].type, "wifi") &&
+		CHECK(!strcmp(t.links[0].type, "80211s") &&
 		      t.links[0].rssi == -26, "wifi-rssi");
 		CHECK(!strcmp(t.links[1].type, "batman"), "batman-second");
 	}
@@ -135,6 +135,21 @@ int main(void)
 		mk_link(&links[0], OM_LINK_BATMAN, "", "phy0-mesh0", 9, 0);
 		om_topology_build(nodes, 1, links, 1, 1, &t);
 		CHECK(t.n_nodes == 1 && t.n_links == 0, "empty-peer-skipped");
+	}
+
+	/* P0 fix: BATMAN multi-hop (via != peer) must NOT create a link */
+	{
+		struct om_link multi;
+		mk_link(&multi, OM_LINK_BATMAN, "03:04:05:06:07:08", "phy0-mesh0", 150, 0);
+		snprintf(multi.via, sizeof(multi.via), "%s", "01:02:03:04:05:06"); /* nexthop != peer */
+		mk_ctrl(&nodes[0]);
+		mk_agent(&nodes[1], "aaaa1111node", "ec:2e:98:d2:71:28", true);
+		om_topology_build(nodes, 2, &multi, 1, 1, &t);
+		CHECK(t.n_links == 0, "multi-hop-batman-filtered");
+		/* direct (via == peer) still passes */
+		snprintf(multi.via, sizeof(multi.via), "%s", "03:04:05:06:07:08");
+		om_topology_build(nodes, 2, &multi, 1, 1, &t);
+		CHECK(t.n_links == 1, "direct-batman-kept");
 	}
 
 	/* 10. empty topology */

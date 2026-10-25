@@ -483,6 +483,16 @@ static int om_topology(struct ubus_context *ctx, struct ubus_object *obj,
 
 	blob_buf_init(&b, 0);
 	blobmsg_add_u32(&b, "timestamp", topo.timestamp);
+	/* Phase 4 audit #3: propagate collection health so the frontend
+	 * can distinguish fresh data from stale retention */
+	if (u->mon) {
+		const char *h = "ok";
+
+		if (u->mon->batman_failed)
+			h = (time(NULL) - u->mon->batman_last_ok <=
+			     OM_BATMAN_RETAIN_S) ? "stale" : "failed";
+		blobmsg_add_string(&b, "batman_collect", h);
+	}
 	an = blobmsg_open_array(&b, "nodes");
 	for (unsigned i = 0; i < topo.n_nodes; i++) {
 		const struct om_topo_node *n = &topo.nodes[i];

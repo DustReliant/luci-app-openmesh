@@ -210,3 +210,60 @@ msgstr "发现、领养、mesh 拓扑与客户端列表均在控制器上管理�
 
 msgid "Mesh topology is rendered on the controller. Open the OpenMesh pages there."
 msgstr "mesh 拓扑在控制器上呈现，请打开控制器上的 OpenMesh 页面。"
+
+msgid "Auto Layout"
+msgstr "自动布局"
+
+msgid "Fit Screen"
+msgstr "适应屏幕"
+
+msgid "Refresh"
+msgstr "刷新"
+
+msgid "Zoom:"
+msgstr "缩放："
+
+msgid "Click a node or link to view details"
+msgstr "点击节点或链路查看详情"
+
+msgid "Link Details"
+msgstr "链路详情"
+
+msgid "Role"
+msgstr "角色"
+
+msgid "Status"
+msgstr "状态"
+
+msgid "Model"
+msgstr "型号"
+
+msgid "Last Seen"
+msgstr "最后在线"
+
+msgid "Clients"
+msgstr "客户端"
+
+msgid "Uptime"
+msgstr "运行时间"
+
+msgid "Source"
+msgstr "源节点"
+
+msgid "Target"
+msgstr "目标节点"
+
+msgid "Type"
+msgstr "类型"
+
+msgid "Interface"
+msgstr "接口"
+
+msgid "TQ"
+msgstr "TQ"
+
+msgid "RSSI"
+msgstr "RSSI"
+
+msgid "TX Rate"
+msgstr "发送速率"

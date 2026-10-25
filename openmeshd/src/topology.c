@@ -81,7 +81,8 @@ static struct om_topo_node *foreign_add(struct om_topology *t, const char *mac)
 	f.model = "";
 	f.mac = (char *)mac;
 	f.role = "unknown";
-	f.online = true;
+	f.online = true;	/* refined by caller via
+				 * om_topo_in_node.collect_health */
 	f.last_seen = t->timestamp;
 	return node_add(t, &f);
 }
@@ -90,7 +91,7 @@ static const char *link_type_str(enum om_link_type t)
 {
 	switch (t) {
 	case OM_LINK_WIFI:
-		return "wifi";
+		return "80211s";
 	case OM_LINK_BATMAN:
 		return "batman";
 	case OM_LINK_WIRED:
@@ -150,6 +151,12 @@ int om_topology_build(const struct om_topo_in_node *nodes, unsigned n_nodes,
 			break;
 		if (!l->peer[0])
 			continue;	/* no peer identity: skip, never guess */
+		/* P0 fix (Phase 4 audit #1): BATMAN originators with
+		 * nexthop != originator are multi-hop ROUTES, not direct
+		 * physical links -- must not appear as topology edges */
+		if (l->type == OM_LINK_BATMAN &&
+		    l->via[0] && strcmp(l->via, l->peer) != 0)
+			continue;
 		peer = node_by_mac(out, l->peer);
 		if (!peer)
 			peer = foreign_add(out, l->peer);
