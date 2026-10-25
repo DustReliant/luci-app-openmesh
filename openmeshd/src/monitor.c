@@ -58,7 +58,13 @@ static struct om_sta *next_sta_slot(struct om_monitor *m)
 	return &m->stas[m->n_stas++];
 }
 
-/* mesh interface names look like "phy1-mesh0" (iw) */
+/*
+ * 802.11s peers. r19 finding: 24.10 iwinfo emits the same compact
+ * one-line-per-station format for mesh peers as for AP clients
+ * ("<MAC>  -27 dBm / -92 dBm (SNR 65)  50 ms ago" + RX:/TX: lines),
+ * not the old per-field "signal:" layout M11 was written against
+ * (that path never saw real peer data before dual-node bring-up).
+ */
 static void poll_wifi_links(struct om_monitor *m)
 {
 	FILE *p = popen("iw dev 2>/dev/null | awk '/Interface/{i=$2} "
@@ -67,51 +73,45 @@ static void poll_wifi_links(struct om_monitor *m)
 	char cmd[128];
 
 	while (p && fgets(ifname, sizeof(ifname), p)) {
+		char line[256];
+		FILE *a;
+		int cur = -1;
+
 		trim(ifname);
 		if (!*ifname)
 			continue;
 		snprintf(m->mesh_ifname, sizeof(m->mesh_ifname), "%s",
 			 ifname);
-		FILE *a;
-		char line[256], prev_mac[20] = "";
-
 		snprintf(cmd, sizeof(cmd),
-			 "iwinfo %s assoclist 2>/dev/null", ifname);
-		a = popen(cmd, "r");
+			 "iwinfo %s assoclist > /tmp/.om_mwl 2>/dev/null", ifname);
+		system(cmd);
+		a = fopen("/tmp/.om_mwl", "r");
 		if (!a)
 			continue;
 		while (fgets(line, sizeof(line), a)) {
-			struct om_link *l;
 			char mac[20];
 			int rssi = 0;
-			unsigned rate = 0;
+			double mb;
 
 			trim(line);
-			if (mac_ok(line)) {
-				snprintf(mac, sizeof(mac), "%s", line);
-				snprintf(prev_mac, sizeof(prev_mac), "%s",
-					 mac);
-				continue;
-			}
-			if (!prev_mac[0])
-				continue;
-			if (sscanf(line, " signal: %d dBm", &rssi) == 1 ||
-			    sscanf(line, " signal: -%d dBm", &rssi) == 1) {
-				l = next_slot(m);
+			if (sscanf(line, "%19s %d dBm", mac, &rssi) >= 2 &&
+			    mac_ok(mac)) {
+				struct om_link *l = next_slot(m);
+
 				if (!l)
 					break;
 				memset(l, 0, sizeof(*l));
 				l->type = OM_LINK_WIFI;
 				snprintf(l->ifname, sizeof(l->ifname), "%s",
 					 ifname);
-				snprintf(l->peer, sizeof(l->peer), "%s",
-					 prev_mac);
+				snprintf(l->peer, sizeof(l->peer), "%s", mac);
 				l->rssi = (int8_t)rssi;
 				l->seen = time(NULL);
-			}
-			if (sscanf(line, " tx bitrate: %u", &rate) == 1 &&
-			    m->n_links > 0) {
-				m->links[m->n_links - 1].tx_rate = rate;
+				cur = m->n_links - 1;
+			} else if (cur >= 0) {
+				if (sscanf(line, "TX: %lf MBit/s", &mb) == 1)
+					m->links[cur].tx_rate =
+						(uint32_t)(mb * 1000);
 			}
 		}
 		pclose(a);
