@@ -482,9 +482,33 @@ int om_netconf_confirm(struct om_netconf *nc)
 
 /*
  * Belt-and-braces: after restoring snapshots, force-drop any om-managed
- * sections that some racing writer may have re-added to the files. These
- * sections are always ours, so deleting them is unconditionally safe.
+ * sections that some racing writer may have re-added to the files.
+ *
+ * r20: only when the pre-transaction snapshot held NO om config. If the
+ * snapshot itself contains committed om sections, they must survive the
+ * rollback -- unconditionally purging them wiped previously committed
+ * mesh when a later (unconfirmed) transaction rolled back (r19 incident:
+ * a wizard 5g create rolled back and took the committed 2g mesh with it).
  */
+static bool snapshot_has_om(const char *path)
+{
+	FILE *f = fopen(path, "r");
+	char buf[512];
+	bool found = false;
+
+	if (!f)
+		return false;
+	while (fgets(buf, sizeof(buf), f)) {
+		if (strstr(buf, "om_managed") ||
+		    strstr(buf, "om_bat") || strstr(buf, "om_mesh")) {
+			found = true;
+			break;
+		}
+	}
+	fclose(f);
+	return found;
+}
+
 static void purge_om_sections(void)
 {
 	system("while uci -q show wireless 2>/dev/null | grep -q om_managed; do "
@@ -500,10 +524,14 @@ int om_netconf_rollback(struct om_netconf *nc)
 	uint32_t gen = nc->generation;
 	int rc = 0;
 
+	bool keep_committed = false;
+
 	if (!nc->active)
 		return -1;
 	uloop_timeout_cancel(&nc->timer);
 	for (int i = 0; i < nc->n_files; i++) {
+		if (snapshot_has_om(nc->bak_files[i]))
+			keep_committed = true;
 		if (copy_file(nc->bak_files[i], nc->dest_files[i]) < 0) {
 			ULOG_ERR("netconf: rollback of %s FAILED, manual "
 				 "check needed\n", nc->dest_files[i]);
@@ -511,7 +539,11 @@ int om_netconf_rollback(struct om_netconf *nc)
 		}
 		unlink(nc->bak_files[i]);
 	}
-	purge_om_sections();
+	if (!keep_committed)
+		purge_om_sections();
+	else
+		ULOG_NOTE("netconf: rollback kept committed om config "
+			  "(present in snapshot)\n");
 	unlink(nc->marker);
 	nc->active = false;
 	nc->committed = false;

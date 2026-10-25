@@ -109,8 +109,12 @@ return view.extend({
 						bandSel = E('select', {
 							'class': 'cbi-input-select'
 						}, [
-							E('option', { 'value': '5g' }, '5 GHz'),
-							E('option', { 'value': '2g' }, '2.4 GHz')
+							/* default 2.4g: single-band agents
+							 * (rtl8188) live here; picking 5g by
+							 * accident wiped committed 2g mesh via
+							 * rollback purge (r19 incident) */
+							E('option', { 'value': '2g' }, '2.4 GHz'),
+							E('option', { 'value': '5g' }, '5 GHz')
 						]))
 				]),
 				E('div', { 'class': 'cbi-value' }, [
