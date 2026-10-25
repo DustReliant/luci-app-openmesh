@@ -39,3 +39,15 @@
 - **验证**：`node --check` JS 语法通过；JSON/po 校验通过；宿主机单测 276 断言全绿（identity 28 + session 35 + discovery 213）；24.10 树 `build.sh` 双包 clean+compile 零警告；smoke：openmeshd 65585B ≤ 150KiB 预算。
 - **已知边界**：Mesh 视图数据源仍是本机 get_links（单机视角），双机后 peer/originator 真数据自然进入两视图，无需再改；mesh 云不显示信道（iwinfo 信道采集留 V0.3 监控任务一并做）。
 - **真机验收清单（r16）**：未建 mesh 时拓扑页 Mesh tab 显示引导；向导建 mesh 后显示 mesh 云与接口名；hybrid 模式 mode=hybrid。
+
+## r16 真机验收回填（2026-10-25，192.168.40.1 / AX3000T / 24.10-SNAPSHOT）
+
+**结论：r16 DRILL-OK，M15 真机验收通过。**
+
+- 验收路径：main(4e463d8) 重建双包（openmeshd 0.0.1-r18 + luci-app + zh_Hans i18n）→ 部署 → 验证 → 活网演练。
+- **踩坑一（构建）**：本地 openwrt 树里 `package/luci-app-openmesh` 是 setup-dev.sh 的**拷贝**而非软链（luci.mk 的 po 发现不吃软链），改前端源码后不重跑 setup-dev.sh 会构建出旧 ipk（本次构建出 9-13 的化石包）。脚本注释本有此警告——命中。
+- **踩坑二（部署考古）**：设备上原 luci-app 是 09726fd（M6/M7 时代）构建、openmeshd 却是 r18——长期"后端新前端旧"混搭，M8/M11/M13 的前端改进从未上过这台设备；本次一并归一。
+- **发现并修复真缺陷**：mesh_ifname 采用"见过就保留"语义，30s 回滚下线后仍残留上报（Mesh 云会显示不存在的接口）→ 改为每轮 poll 清空重记（与 links 同语义，最长滞后一个 announce 间隔 10s）。修复后活网验证：mesh_create → 13s 后 mesh_ifname=phy1-mesh0 上报 ✓；apply_rollback → 13s 后 mesh_ifname 清除 ✓；get_links 全程无错（单节点空表）✓；wireless 与演练前逐字节一致 ✓。
+- **断言时序教训**：mesh_ifname 依赖 monitor 周期轮询（10s），演练断言必须留足一个轮询窗口（首版 5s 断言误报失败）。
+- 首次演练失败退出后无人善后，30s 事务自动回滚兜底生效——M7 安全网再次自证。
+- 遗留（不阻塞）：浏览器端渲染目检（页面 JS 已部署且经 uhttpd 提供、语法校验通过，但未做带登录的 GUI 截图验证——留待用户顺手确认）；mesh 云信道展示仍留 V0.3。
