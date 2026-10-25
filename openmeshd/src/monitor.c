@@ -168,6 +168,7 @@ static void poll_batman_links(struct om_monitor *m)
 void om_monitor_poll(struct om_monitor *m)
 {
 	m->n_links = 0;
+	m->mesh_ifname[0] = '\0';
 	m->last_poll = time(NULL);
 	poll_wifi_links(m);
 	poll_batman_links(m);
