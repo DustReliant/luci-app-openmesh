@@ -1,5 +1,5 @@
 diff --git a/package/kernel/mac80211/Makefile b/package/kernel/mac80211/Makefile
-index e5b9459ddf..91fe0b8255 100644
+index e5b9459ddf..7573d7e5b7 100644
 --- a/package/kernel/mac80211/Makefile
 +++ b/package/kernel/mac80211/Makefile
 @@ -27,6 +27,7 @@ PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
@@ -37,7 +37,18 @@ index e5b9459ddf..91fe0b8255 100644
  
  config-$(call config_package,wlcore) += WLCORE WLCORE_SDIO
  config-$(call config_package,wl12xx) += WL12XX
-+config-$(call config_package,rtl8188ee) += RTLWIFI RTLWIFI_PCI RTL8188EE
++config-$(call config_package,rtl8188ee) += RTL_CARDS RTLWIFI RTLWIFI_PCI RTL8188EE
  config-$(call config_package,wl18xx) += WL18XX
  config-y += WL_TI WILINK_PLATFORM_DATA
  config-$(call config_package,rsi91x) += RSI_91X
+diff --git a/target/linux/x86/config-6.6 b/target/linux/x86/config-6.6
+index d765fbbdf5..a6ea3f7f58 100644
+--- a/target/linux/x86/config-6.6
++++ b/target/linux/x86/config-6.6
+@@ -480,3 +480,6 @@ CONFIG_X86_VMX_FEATURE_NAMES=y
+ CONFIG_XZ_DEC_BCJ=y
+ CONFIG_XZ_DEC_X86=y
+ CONFIG_ZLIB_INFLATE=y
++
++# wireless deps (mesh node bring-up, r19)
++CONFIG_CRYPTO_CMAC=m

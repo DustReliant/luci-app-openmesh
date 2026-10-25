@@ -31,13 +31,25 @@ cd ~/Build_OpenWrt/openwrt
 git apply ~/Build_OpenWrt/luci-app-openmesh/scripts/openwrt-patches/0001-mac80211-restore-rtl8188ee.patch
 ```
 
-补丁只改 `package/kernel/mac80211/Makefile`，三处：
-1. `PKG_DRIVERS` 清单加 `rtl8188ee`；
-2. 驱动内核开关一行：`config-$(call config_package,rtl8188ee) += RTLWIFI RTLWIFI_PCI RTL8188EE`；
-3. `KernelPackage/rtl8188ee` 定义块（rtlwifi 核心 + rtl_pci 总线 + 8188ee
-   芯片**三模块合一**打包，依赖 kmod-mac80211 + rtl8188e-firmware）。
+补丁改两处文件：
 
-树更新后 apply 冲突时：按上面三件事手动重做即可（补丁很小，行号漂移正常）。
+**`package/kernel/mac80211/Makefile`**（三件事）：
+1. `PKG_DRIVERS` 清单加 `rtl8188ee`；
+2. 驱动内核开关：`config-$(call config_package,rtl8188ee) += RTL_CARDS RTLWIFI RTLWIFI_PCI RTL8188EE`
+   —— **RTL_CARDS 是总门**（rtlwifi/Kconfig 里所有符号都包在
+   `menuconfig RTL_CARDS` 的 `if` 里，不开它其余符号全被 kconfig 静默丢弃）；
+3. `KernelPackage/rtl8188ee` 定义块（rtlwifi 核心 + rtl_pci 总线 + 8188ee
+   芯片**三模块合一**打包，依赖 kmod-mac80211；固件包已被上游合并消失，
+   不能写进 DEPENDS，设备侧用存量 `rtl8188e-firmware` ipk 安装）。
+
+**`target/linux/x86/config-6.6`**（一行）：
+- `CONFIG_CRYPTO_CMAC=m` —— **x86 目标内核历史性缺失此符号**（mediatek 各
+  目标都显式开）。backports 里 MAC80211 `depends on CRYPTO_CMAC`，缺了则
+  kconfig 永远拒绝启用 MAC80211（allnoconfig 静默丢弃，allyesconfig 也压
+  不上，症状极隐蔽）。用 =m 模块形态：设备侧只需装 kmod-crypto-cmac 包
+  （自带 cmac.ko），**无需重刷内核**。
+
+树更新后 apply 冲突时：按上面条目手动重做即可（补丁很小，行号漂移正常）。
 
 ### 2. 选包并编译
 
