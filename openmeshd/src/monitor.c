@@ -117,7 +117,7 @@ static void poll_wifi_links(struct om_monitor *m)
 		pclose(a);
 	}
 	if (p)
-		pclose(p);
+		fclose(p);
 }
 
 static void poll_batman_links(struct om_monitor *m)
@@ -127,13 +127,15 @@ static void poll_batman_links(struct om_monitor *m)
 	char line[256];
 	bool header = true;
 
-	snprintf(cmd, sizeof(cmd), "batctl meshif %s originators -n 2>/dev/null",
+	snprintf(cmd, sizeof(cmd),
+		 "batctl meshif %s originators -n > /tmp/.om_bat 2>/dev/null",
 		 OM_BAT_IF);
-	p = popen(cmd, "r");
+	system(cmd);
+	p = fopen("/tmp/.om_bat", "r");
 	if (!p)
 		return;
 	while (fgets(line, sizeof(line), p)) {
-		char mac[20], last[24], via[20], q[8];
+		char mac[20], last[24], via[20], q[16];
 		double quality;
 		unsigned rate_kbps = 0;
 		struct om_link *l;
@@ -144,28 +146,42 @@ static void poll_batman_links(struct om_monitor *m)
 				header = false;
 			continue;
 		}
-		if (sscanf(line, "%19s %23s %19s %7s %lf",
-			   mac, last, via, q, &quality) < 5)
-			continue;
+		/*
+		 * r19: batman-adv 2024.3 layout is
+		 *   [ *] MAC  last-seen (#/255) NEXTHOP [outgoingIF]
+		 * (data rows are indented; direct peers carry a leading
+		 * '*'). The old M9-era "mac last via q quality" sscanf
+		 * never matched -- untested on real originators until
+		 * dual-node bring-up.
+		 */
+		{
+			char *s = line;
+
+			while (*s == ' ' || *s == '\t')
+				s++;
+			if (*s == '*')
+				s++;
+			if (sscanf(s, "%19s %23s (%lf) %19s [%15s]",
+				   mac, last, &quality, via, q) < 3)
+				continue;
+			{
+				size_t ql = strlen(q);
+
+				if (ql && q[ql - 1] == ']')
+					q[ql - 1] = '\0';
+			}
+		}
 		if (!mac_ok(mac))
 			continue;
-		/* possible trailing "( x Mbit/s)" candidate qualifier */
-		{
-			char *sp = strchr(line, '(');
-			double mb = 0;
-
-			if (sp && sscanf(sp, "( %lf Mbit/s", &mb) == 1)
-				rate_kbps = (unsigned)(mb * 1000);
-		}
-		if (!strcmp(via, "0.0.0.0"))
-			continue;	/* self entry */
+		/* direct (single-hop) originators legitimately have
+		 * nexthop == originator; own entries are not listed */
 		l = next_slot(m);
 		if (!l)
 			break;
 		memset(l, 0, sizeof(*l));
 		l->type = OM_LINK_BATMAN;
 		snprintf(l->peer, sizeof(l->peer), "%s", mac);
-		snprintf(l->via, sizeof(l->via), "%s", via);
+		snprintf(l->via, sizeof(l->via), "%s", q[0] ? q : via);
 		l->tx_rate = rate_kbps;
 		l->seen = time(NULL);
 	}

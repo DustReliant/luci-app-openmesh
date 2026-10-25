@@ -40,10 +40,10 @@ return view.extend({
 		var res = { bound: [], foreign: [] };
 
 		(nodes || []).forEach(function(n) {
-			if (n.mac) byMac[n.mac] = n;
+			if (n.mac) byMac[n.mac.toLowerCase()] = n;
 		});
 		(links || []).forEach(function(l) {
-			var n = byMac[l.peer];
+			var n = byMac[String(l.peer || '').toLowerCase()];
 			if (n)
 				res.bound.push({ link: l, node: n });
 			else
