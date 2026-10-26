@@ -285,3 +285,27 @@ msgstr "拓扑在控制器上呈现。"
 
 msgid "Reset"
 msgstr "重置布局"
+
+msgid "Controller"
+msgstr "控制器"
+
+msgid "Agent"
+msgstr "代理节点"
+
+msgid "Auto Layout"
+msgstr "自动布局"
+
+msgid "Zoom"
+msgstr "缩放"
+
+msgid "Device"
+msgstr "设备"
+
+msgid "Info"
+msgstr "信息"
+
+msgid "Connection"
+msgstr "连接"
+
+msgid "Quality"
+msgstr "质量"
