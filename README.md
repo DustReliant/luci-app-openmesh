@@ -2,34 +2,147 @@
 
 > OpenWrt Mesh 编排与管理系统 —— 让多台 OpenWrt 路由器像商业 Mesh 产品一样简单易用。
 >
-> **当前状态：V0.1 已发布（管理面闭环 + 原生 802.11s 建网，tag `v0.1`）。**
+> **当前状态：V0.2 RC1（tag `v0.2.0-rc1`），双机 802.11s + BATMAN-ADV 真机运行中。**
 
-## V0.1 功能
+## 功能总览
 
+### 网络管理闭环
 - ✅ 节点自动发现（UDP 签名广播，Ed25519 防伪造/防重放）
 - ✅ 节点授权领养（加密会话通道：X25519 ECDH + ChaCha20-Poly1305）
 - ✅ 已领养节点持久化（UCI）与重启恢复
-- ✅ LuCI 界面：节点表 / 待领养 / 拓扑图 / Mesh 创建向导
 - ✅ 一键创建/加入 802.11s Mesh（原生 UCI 配置，SAE 加密）
+- ✅ hybrid 模式（802.11s + batman-adv）双机自动建立
 - ✅ 配置事务安全网：30 秒不确认自动回滚（含掉电恢复）
+- ✅ 已提交配置受回滚保护（快照感知清理）
 
-后端 ubus 对象 `openmesh`（status / list_nodes / list_pending / list_adopted / adopt / revoke / mesh_create / mesh_join / apply_confirm / apply_rollback / health）+ 事件（node.new / node.adopted / config.applied / config.rolledback）。
+### 交互式拓扑管理
+- ✅ SVG 交互画布：节点拖拽 / 画布平移 / 滚轮+双指缩放
+- ✅ 商业级节点卡片（180×85，状态圆点，白底圆角+阴影）
+- ✅ 双链路曲线分离（802.11s 虚线 / BATMAN 点线，贝塞尔曲线+标签底板）
+- ✅ BFS 智能布局（星形/链式/树形/环形/孤立节点自适应）
+- ✅ 节点/链路点击详情面板（分组展示）
+- ✅ 布局持久化（localStorage，按控制器 node_id 网络隔离）
+- ✅ 5 秒实时刷新（新节点自动加入，已有节点位置不变）
+- ✅ 采集健康指示（ok/stale/failed，与节点在线状态解耦）
+- ✅ 移动端适配（Pointer Events 统一鼠标+触摸，响应式布局）
 
-测试基线：宿主机 275 项断言 + 真机（Xiaomi AX3000T / MT7981）E2E（领养/持久化/回滚/11s 接口全绿）+ CI 三版本（23.05/24.10/master）× 双架构矩阵。
+### 监控与数据
+- ✅ 客户端列表（AP 关联设备 MAC/SSID/RSSI/速率）
+- ✅ Mesh peer 监控（iwinfo 解析 RSSI）
+- ✅ BATMAN originator 监控（TQ、接口、多跳过滤）
+- ✅ 漫游增强 802.11k/v/r（向导一键推送）
+- ✅ 72h 稳定性采样（CSV 输出）
 
-## 项目定位
+## 系统架构
 
-在 OpenWrt **原生**网络组件之上，构建一层面向普通用户的「Mesh 编排与管理层」：
+```
+LuCI Web 界面（交互式拓扑 + 节点管理 + 向导）
+        ↓
+ubus RPC（openmesh 对象：13 个方法）
+        ↓
+openmeshd 守护进程（C，libubox/libubus/libuci/libsodium）
+  ├── identity    身份与密钥（Ed25519）
+  ├── discovery   UDP 发现（签名 announce）
+  ├── session_net 会话通道（ECDH + 加密帧）
+  ├── netconf     配置事务（快照/确认/回滚）
+  ├── monitor     数据采集（mesh peer + batman + AP 客户端）
+  ├── batman_collect  batctl 执行层（可配超时）
+  ├── batman_parse    batctl 解析层（纯函数，零依赖）
+  ├── topology    统一 Node/Link 模型
+  └── store       UCI 持久化
+        ↓
+UCI / netifd / hostapd / iw / batctl
+        ↓
+802.11s / BATMAN-ADV / Ethernet
+```
 
-- 自动发现、授权认领、一键建网/入网
-- 集中状态监控、拓扑展示、故障检测与恢复
-- 有线/无线回程统一编排（数据面切换交给 802.11s / batman-adv 原生能力）
+## 快速开始
 
-**明确不做的事**（技术红线，见 `docs/workflow.md`）：
+### 安装
 
-- 不重新实现 802.11s / batman-adv / hostapd / netifd / ubus / UCI
-- 不自研链路探测与回程切换逻辑（batman-adv metric 原生完成）
-- 不修改 OpenWrt 核心代码
+```sh
+# 从源码构建（需要 OpenWrt 24.10 SDK）
+./scripts/setup-dev.sh /path/to/openwrt
+./scripts/build.sh /path/to/openwrt
+
+# 或直接安装预编译包
+opkg install openmeshd_*.ipk luci-app-openmesh_*.ipk
+```
+
+### 使用
+
+1. **控制器**：安装 openmeshd + luci-app-openmesh，打开 LuCI → 网络 → OpenMesh
+2. **代理节点**：安装 openmeshd，配置 `uci set openmesh.main.role='agent'` 和 `controller_addr`
+3. **建网**：控制器 LuCI → Mesh 向导 → 创建 Mesh（默认 2.4GHz + SAE）
+4. **拓扑**：控制器 LuCI → 拓扑 → 查看实时网络拓扑
+
+### ubus API
+
+```sh
+ubus call openmesh status          # 节点状态
+ubus call openmesh list_adopted    # 已领养节点
+ubus call openmesh get_links       # 回程链路（含采集健康）
+ubus call openmesh get_clients     # AP 客户端
+ubus call openmesh get_mesh_info   # Mesh 配置信息
+ubus call openmesh topology        # 统一拓扑快照
+ubus call openmesh mesh_create     # 创建 Mesh（事务）
+ubus call openmesh apply_confirm   # 确认配置
+ubus call openmesh adopt           # 领养节点
+```
+
+## 项目结构
+
+```
+luci-app-openmesh/       # LuCI Web 管理界面
+  htdocs/.../topology.js #   交互式拓扑画布
+  htdocs/.../overview.js #   节点/客户端列表
+  htdocs/.../wizard.js   #   建网向导
+openmeshd/               # 核心后台 daemon（C）
+  src/identity.c         #   Ed25519 身份
+  src/discovery.c        #   UDP 发现
+  src/session_net.c      #   加密会话
+  src/netconf.c          #   配置事务
+  src/monitor.c          #   数据采集
+  src/batman_parse.c     #   batctl 纯解析
+  src/batman_collect.c   #   batctl 执行层
+  src/topology.c         #   Node/Link 统一模型
+docs/                    # 设计文档（ADR + 模块设计）
+scripts/                 # 构建辅助 + OpenWrt 补丁
+tests/                   # 自动化测试
+```
+
+## 测试
+
+```sh
+# 宿主机全套测试（无 OpenWrt SDK 依赖）
+./tests/host-build.sh
+# identity 28 + session 35 + batman 18 + topology 22 + discovery 213 断言
+
+# 前端测试（Node.js）
+node tests/test_topology_frontend.js   # 布局持久化+安全 23 项
+node tests/test_phase62.js             # 智能布局+双链路 22 项
+
+# 命令层测试（假 batctl）
+./tests/test_batman_cmdlayer.sh
+
+# 真机部署后冒烟
+./tests/smoke.sh /path/to/sdk
+```
+
+## 兼容性
+
+| 维度 | 目标 |
+|---|---|
+| OpenWrt 版本 | 23.05 / 24.10 / 25.x（CI 三版本矩阵） |
+| 硬件 | x86_64、MT7981（AX3000T）、MT7986 |
+| 浏览器 | Chrome/Edge/Firefox 桌面 + Android Chrome（Pointer Events） |
+
+## 已验证真机环境
+
+- 控制器：小米 AX3000T（MT7981，24.10-SNAPSHOT）
+- 代理：x86 迷你主机（RTL8188EE 2.4G，24.10 种子镜像）
+- 链路：802.11s SAE 加密（RSSI -26dBm）+ BATMAN-ADV（TQ 230）
+- 72 小时稳定性测试进行中
 
 ## 命名与商标声明
 
@@ -41,35 +154,18 @@
 
 本项目不宣称 EasyMesh 认证兼容；802.11k/v/r 支持不等于 EasyMesh。
 
-## 兼容性与硬件目标
+## License
 
-| 维度 | 目标 |
-|---|---|
-| OpenWrt 版本 | 23.05 / 24.10 / 25.x（每 PR 经 CI 三版本矩阵编译验证） |
-| 硬件 | x86_64、MT7981、MT7986（第一阶段） |
-
-## 仓库结构（规划）
-
-```
-luci-app-openmesh/   # LuCI Web 管理界面（仅控制器节点安装）
-openmeshd/           # 核心后台 daemon（C，libubox/libubus/libuci）
-docs/                # 设计文档（本目录为现阶段唯一产物）
-scripts/             # 测试与部署辅助脚本
-tests/               # 自动化测试
-```
+GPL-3.0-or-later（依赖 libsodium 为 ISC、libubox/libubus 为 LGPL-2.1）
 
 ## 文档索引
 
 | 文档 | 内容 |
 |---|---|
-| [docs/workflow.md](docs/workflow.md) | 开发工作流规范（阶段、循环、10 问、报告模板、Git 约定） |
-| [docs/architecture.md](docs/architecture.md) | 总体架构 v1 草案（14 项：架构图/模块/daemon/LuCI/协议/数据结构/ubus/UCI/发现/认证/恢复/兼容/任务拆解） |
-| [docs/roadmap.md](docs/roadmap.md) | 版本路线图（V0.1–V1.0）与 V0.1 任务拆解（M0–M8 + DoD） |
-| [docs/decisions/](docs/decisions/) | 架构决策记录（ADR） |
-| [docs/research/README.md](docs/research/README.md) | 调研计划（mesh11sd / easymesh 系 / OMM / 版本兼容性） |
-| [docs/design/README.md](docs/design/README.md) | 模块设计文档规范与模板 |
-| [docs/testing/README.md](docs/testing/README.md) | 测试策略（CI 矩阵 / 单测 / QEMU 多节点 / 真机） |
-
-## License
-
-待定（M0 决定，倾向 GPL-3.0 或 MPL-2.0；依赖 libsodium 为 ISC、libubox/libubus 为 LGPL-2.1，需一并审视）。
+| [workflow.md](docs/workflow.md) | 开发工作流规范 |
+| [architecture.md](docs/architecture.md) | 总体架构 |
+| [roadmap.md](docs/roadmap.md) | 版本路线图 |
+| [v0.2-plan.md](docs/design/v0.2-plan.md) | V0.2 里程碑 + 真机验证记录 |
+| [m18-topology-model.md](docs/design/m18-topology-model.md) | 统一拓扑模型设计 |
+| [scripts/openwrt-patches/](scripts/openwrt-patches/) | rtl8188ee 驱动补丁 + 自编译指南 |
+| [ADR 列表](docs/decisions/) | 架构决策记录（8 篇） |
