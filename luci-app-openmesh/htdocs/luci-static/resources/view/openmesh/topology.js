@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /*
- * OpenMesh Manager interactive topology canvas (Phase 5.2).
+ * OpenMesh Manager interactive topology canvas (Phase 6).
  *
- * SVG-based with Pointer Events (mouse + touch unified).
- * Features: node drag, canvas pan, pinch/wheel zoom, auto-layout,
- * node/link detail panel, 5s polling preserving positions.
- * Responsive: detail panel stacks below canvas on narrow screens.
+ * Phase 6.0: HTML injection hardening (esc() on all dynamic text,
+ * safe querySelector, attribute-only data-id binding).
+ * Phase 6.1: Layout persistence via localStorage (positions + viewport
+ * auto-saved on drag end/layout change, auto-restored on page load,
+ * new-node position protection, explicit reset).
+ *
+ * Network state and UI layout are strictly separate: layout data
+ * lives only in the browser, keyed by stable node_id, never in the
+ * backend model.
  */
 'use strict';
 'require view';
@@ -17,10 +22,13 @@ var callTopology = rpc.declare({ object: 'openmesh', method: 'topology' });
 var ZOOM_MIN = 0.3, ZOOM_MAX = 3.0;
 var NODE_W = 110, NODE_H = 52;
 var POLL_INTERVAL = 5;
+var LAYOUT_VERSION = 1;
+var STORAGE_KEY_PREFIX = 'openmesh-topo-layout-';
 
 function esc(s) {
 	return String(s || '').replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+		.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;');
 }
 
 function shortMac(mac) {
@@ -34,8 +42,12 @@ function shortId(id) {
 
 function fmtAgo(ts) {
 	if (!ts) return '-';
-	var d = new Date(ts * 1000);
-	return d.toLocaleTimeString();
+	return new Date(ts * 1000).toLocaleTimeString();
+}
+
+/* CSS-safe attribute value for querySelector: escape quotes and brackets */
+function cssEsc(s) {
+	return String(s || '').replace(/"/g, '\\"').replace(/]/g, '\\]');
 }
 
 return view.extend({
@@ -55,9 +67,89 @@ return view.extend({
 	lastData: null,
 	_pointers: {},
 	_pinchDist: 0,
+	_layoutScope: '',
+	_saveTimer: null,
 
 	load: function() {
 		return L.resolveDefault(callTopology(), {});
+	},
+
+	/* ---- layout persistence (Phase 6.1) ---- */
+
+	_layoutKey: function() {
+		/* scope by controller node_id prefix (stable identity, first 16 hex
+		 * chars is enough to disambiguate networks without storing the full
+		 * key); falls back to hostname-based key if nodes unavailable */
+		if (this._layoutScope)
+			return STORAGE_KEY_PREFIX + this._layoutScope;
+		return STORAGE_KEY_PREFIX + 'default';
+	},
+
+	saveLayout: function() {
+		try {
+			var data = {
+				version: LAYOUT_VERSION,
+				positions: this.nodePos,
+				viewport: { zoom: this.zoom, panX: this.pan.x, panY: this.pan.y }
+			};
+			localStorage.setItem(this._layoutKey(), JSON.stringify(data));
+		} catch (e) {
+			/* storage full or unavailable: layout persistence is best-effort */
+		}
+	},
+
+	saveLayoutDebounced: function() {
+		var self = this;
+		if (this._saveTimer) clearTimeout(this._saveTimer);
+		this._saveTimer = setTimeout(function() {
+			self.saveLayout();
+			self._saveTimer = null;
+		}, 300);
+	},
+
+	loadLayout: function() {
+		try {
+			var raw = localStorage.getItem(this._layoutKey());
+			if (!raw) return false;
+			var data = JSON.parse(raw);
+			if (!data || data.version !== LAYOUT_VERSION) return false;
+			if (!data.positions || typeof data.positions !== 'object') return false;
+			var restored = false;
+			var self = this;
+			Object.keys(data.positions).forEach(function(id) {
+				var p = data.positions[id];
+				if (p && typeof p.x === 'number' && typeof p.y === 'number' &&
+				    isFinite(p.x) && isFinite(p.y) &&
+				    p.x > -10000 && p.x < 10000 &&
+				    p.y > -10000 && p.y < 10000) {
+					self.nodePos[id] = { x: p.x, y: p.y };
+					restored = true;
+				}
+			});
+			if (data.viewport) {
+				var v = data.viewport;
+				if (typeof v.zoom === 'number' && isFinite(v.zoom) &&
+				    v.zoom >= ZOOM_MIN && v.zoom <= ZOOM_MAX)
+					this.zoom = v.zoom;
+				if (typeof v.panX === 'number' && isFinite(v.panX))
+					this.pan.x = v.panX;
+				if (typeof v.panY === 'number' && isFinite(v.panY))
+					this.pan.y = v.panY;
+			}
+			return restored;
+		} catch (e) {
+			return false; /* corrupted JSON: safely ignore, use defaults */
+		}
+	},
+
+	resetLayout: function() {
+		try { localStorage.removeItem(this._layoutKey()); } catch (e) {}
+		this.nodePos = {};
+		this.zoom = 1;
+		this.pan = { x: 0, y: 0 };
+		if (this.lastNodes) this.autoLayout(this.lastNodes);
+		this.applyTransform();
+		this.saveLayout();
 	},
 
 	/* ---- layout ---- */
@@ -80,12 +172,14 @@ return view.extend({
 		});
 		self.applyTransform();
 		self.renderAll();
+		self.saveLayoutDebounced();
 	},
 
 	fitScreen: function() {
 		this.zoom = 1;
 		this.pan = { x: 0, y: 0 };
 		this.applyTransform();
+		this.saveLayoutDebounced();
 	},
 
 	applyTransform: function() {
@@ -136,7 +230,7 @@ return view.extend({
 		var self = this;
 		var g = this.svgGroup.querySelector('.node-layer');
 		if (!g) return;
-		g.innerHTML = '';
+		while (g.firstChild) g.removeChild(g.firstChild);
 		this.lastNodes.forEach(function(n) {
 			var p = self.nodePos[n.id];
 			if (!p) p = self.nodePos[n.id] = { x: self.canvasW/2, y: self.canvasH/2 };
@@ -148,13 +242,28 @@ return view.extend({
 			el.setAttribute('transform', 'translate(' + p.x + ',' + p.y + ')');
 			el.style.cursor = 'pointer';
 			el.style.touchAction = 'none';
-			el.innerHTML =
-				'<rect x="-55" y="-26" width="110" height="52" rx="10"' +
-				' fill="' + fill + '" stroke="' + (sel ? '#ff9800' : 'rgba(0,0,0,0.15)') + '"' +
-				' stroke-width="' + (sel ? 3 : 1) + '"/>' +
-				'<text y="-8" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">' + esc(n.hostname) + '</text>' +
-				'<text y="6" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="10">' + esc(n.role) + '</text>' +
-				'<text y="18" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="9">' + esc(n.ip || shortId(n.id)) + '</text>';
+
+			var r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+			r.setAttribute('x', -NODE_W/2); r.setAttribute('y', -NODE_H/2);
+			r.setAttribute('width', NODE_W); r.setAttribute('height', NODE_H);
+			r.setAttribute('rx', 10); r.setAttribute('fill', fill);
+			r.setAttribute('stroke', sel ? '#ff9800' : 'rgba(0,0,0,0.15)');
+			r.setAttribute('stroke-width', sel ? 3 : 1);
+			el.appendChild(r);
+
+			[['y',-8,n.hostname,'#fff',12,'bold'],
+			 ['y',6,n.role,'rgba(255,255,255,0.8)',10,''],
+			 ['y',18,n.ip || shortId(n.id),'rgba(255,255,255,0.6)',9,'']
+			].forEach(function(a) {
+				var t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+				t.setAttribute(a[0], a[1]);
+				t.setAttribute('text-anchor', 'middle');
+				t.setAttribute('fill', a[2 + 1]);
+				t.setAttribute('font-size', a[4]);
+				if (a[5]) t.setAttribute('font-weight', a[5]);
+				t.textContent = a[2]; /* DOM text node: immune to HTML injection */
+				el.appendChild(t);
+			});
 			g.appendChild(el);
 		});
 	},
@@ -163,7 +272,7 @@ return view.extend({
 		var self = this;
 		var g = this.svgGroup.querySelector('.link-layer');
 		if (!g) return;
-		g.innerHTML = '';
+		while (g.firstChild) g.removeChild(g.firstChild);
 		(self.lastLinks || []).forEach(function(l) {
 			var s = self.nodePos[l.source];
 			var d = self.nodePos[l.target];
@@ -174,84 +283,135 @@ return view.extend({
 			el.setAttribute('class', 'topo-link');
 			el.setAttribute('data-id', l.id);
 			el.style.cursor = 'pointer';
-			el.innerHTML =
-				'<line x1="' + s.x + '" y1="' + s.y + '" x2="' + d.x + '" y2="' + d.y + '"' +
-				' stroke="' + st.stroke + '" stroke-width="' + (sel ? st.w + 2 : st.w) + '"' +
-				' stroke-dasharray="' + st.dash + '" opacity="' + (sel ? '1.0' : '0.7') + '"/>' +
-				'<line x1="' + s.x + '" y1="' + s.y + '" x2="' + d.x + '" y2="' + d.y + '"' +
-				' stroke="transparent" stroke-width="20"/>' +
-				(self.linkLabel(l) ?
-				 '<text x="' + (s.x+d.x)/2 + '" y="' + ((s.y+d.y)/2 - 6) + '"' +
-				 ' text-anchor="middle" fill="' + st.stroke + '" font-size="9">' + esc(self.linkLabel(l)) + '</text>' : '');
+
+			var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+			line.setAttribute('x1', s.x); line.setAttribute('y1', s.y);
+			line.setAttribute('x2', d.x); line.setAttribute('y2', d.y);
+			line.setAttribute('stroke', st.stroke);
+			line.setAttribute('stroke-width', sel ? st.w + 2 : st.w);
+			line.setAttribute('stroke-dasharray', st.dash);
+			line.setAttribute('opacity', sel ? '1.0' : '0.7');
+			el.appendChild(line);
+
+			var hit = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+			hit.setAttribute('x1', s.x); hit.setAttribute('y1', s.y);
+			hit.setAttribute('x2', d.x); hit.setAttribute('y2', d.y);
+			hit.setAttribute('stroke', 'transparent');
+			hit.setAttribute('stroke-width', 20);
+			el.appendChild(hit);
+
+			var label = self.linkLabel(l);
+			if (label) {
+				var t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+				t.setAttribute('x', (s.x + d.x) / 2);
+				t.setAttribute('y', (s.y + d.y) / 2 - 6);
+				t.setAttribute('text-anchor', 'middle');
+				t.setAttribute('fill', st.stroke);
+				t.setAttribute('font-size', 9);
+				t.textContent = label;
+				el.appendChild(t);
+			}
 			g.appendChild(el);
 		});
 	},
 
-	/* ---- detail panel ---- */
+	/* ---- detail panel (uses textContent, not innerHTML, for values) ---- */
 	renderDetail: function() {
 		var el = document.querySelector('.topo-detail-body');
 		if (!el) return;
-		var h = '';
+		while (el.firstChild) el.removeChild(el.firstChild);
+
+		var title = document.createElement('div');
+		title.style.cssText = 'font-weight:bold;font-size:14px;margin-bottom:8px';
 
 		if (this.selectedNode && this.lastNodes) {
 			var n = null;
 			for (var i = 0; i < this.lastNodes.length; i++)
 				if (this.lastNodes[i].id === this.selectedNode) { n = this.lastNodes[i]; break; }
 			if (n) {
-				h = '<div style="font-weight:bold;font-size:14px;margin-bottom:8px">' + esc(n.hostname) + '</div>';
-				h += this._kv('Role', n.role);
-				h += this._kv('Status', '<span style="color:' + (n.status === 'online' ? '#4caf50' : '#f44336') + '">' + esc(n.status) + '</span>');
-				h += this._kv('IP', esc(n.ip || '-'));
-				h += this._kv('MAC', esc(shortMac(n.mac)));
-				h += this._kv('Model', esc(n.model || '-'));
-				h += this._kv('Last Seen', fmtAgo(n.last_seen));
-				h += this._kv('Clients', String(n.client_count || 0));
+				title.textContent = n.hostname;
+				el.appendChild(title);
+				this._addRow(el, 'Role', n.role);
+				this._addRow(el, 'Status', n.status, n.status === 'online' ? '#4caf50' : '#f44336');
+				this._addRow(el, 'IP', n.ip || '-');
+				this._addRow(el, 'MAC', shortMac(n.mac));
+				this._addRow(el, 'Model', n.model || '-');
+				this._addRow(el, 'Last Seen', fmtAgo(n.last_seen));
+				this._addRow(el, 'Clients', String(n.client_count || 0));
 			}
 		} else if (this.selectedLink && this.lastLinks) {
 			var l = null;
 			for (var j = 0; j < this.lastLinks.length; j++)
 				if (this.lastLinks[j].id === this.selectedLink) { l = this.lastLinks[j]; break; }
 			if (l && this.lastNodes) {
+				var self = this;
 				var nm = function(id) {
 					for (var k = 0; k < self.lastNodes.length; k++)
 						if (self.lastNodes[k].id === id) return self.lastNodes[k].hostname;
 					return shortId(id);
 				};
-				h = '<div style="font-weight:bold;font-size:14px;margin-bottom:8px">' + _('Link') + '</div>';
-				h += this._kv('Source', esc(nm(l.source)));
-				h += this._kv('Target', esc(nm(l.target)));
-				h += this._kv('Type', '<span style="color:' + this.linkStyle(l).stroke + '">' + esc(l.type) + '</span>');
-				h += this._kv('Status', esc(l.status));
-				h += this._kv('Interface', esc(l.interface || '-'));
-				if (l.tq) h += this._kv('TQ', String(l.tq));
-				if (l.rssi) h += this._kv('RSSI', l.rssi + ' dBm');
-				if (l.tx_rate) h += this._kv('TX Rate', Math.round(l.tx_rate / 1000) + ' Mbps');
+				title.textContent = _('Link');
+				el.appendChild(title);
+				this._addRow(el, 'Source', nm(l.source));
+				this._addRow(el, 'Target', nm(l.target));
+				this._addRow(el, 'Type', l.type, this.linkStyle(l).stroke);
+				this._addRow(el, 'Status', l.status);
+				this._addRow(el, 'Interface', l.interface || '-');
+				if (l.tq) this._addRow(el, 'TQ', String(l.tq));
+				if (l.rssi) this._addRow(el, 'RSSI', l.rssi + ' dBm');
+				if (l.tx_rate) this._addRow(el, 'TX Rate', Math.round(l.tx_rate / 1000) + ' Mbps');
 			}
 		} else {
-			h = '<div style="color:#999;font-size:small;padding:20px 0;text-align:center">' +
-				_('Tap a node or link<br/>to view details') + '</div>';
+			var hint = document.createElement('div');
+			hint.style.cssText = 'color:#999;font-size:small;padding:20px 0;text-align:center';
+			hint.textContent = _('Tap a node or link to view details');
+			el.appendChild(hint);
 		}
-		el.innerHTML = h;
 	},
 
-	_kv: function(k, v) {
-		return '<div style="display:flex;justify-content:space-between;padding:4px 0;' +
-			'border-bottom:1px solid #f0f0f0;font-size:12px">' +
-			'<span style="color:#888">' + _(k) + '</span><span>' + v + '</span></div>';
+	_addRow: function(parent, key, value, color) {
+		var row = document.createElement('div');
+		row.style.cssText = 'display:flex;justify-content:space-between;padding:4px 0;' +
+			'border-bottom:1px solid #f0f0f0;font-size:12px';
+		var k = document.createElement('span');
+		k.style.color = '#888';
+		k.textContent = key;
+		var v = document.createElement('span');
+		if (color) v.style.color = color;
+		v.textContent = value;
+		row.appendChild(k);
+		row.appendChild(v);
+		parent.appendChild(row);
 	},
 
 	renderStatus: function(data) {
 		var el = document.querySelector('.topo-status');
 		if (!el) return;
+		while (el.firstChild) el.removeChild(el.firstChild);
 		var health = (data && data.batman_collect) || 'ok';
 		var hc = health === 'ok' ? '#4caf50' : health === 'stale' ? '#ff9800' : '#f44336';
-		el.innerHTML =
-			'<span> nodes <b>' + (data && data.nodes ? data.nodes.length : 0) + '</b></span>' +
-			'<span> links <b>' + (data && data.links ? data.links.length : 0) + '</b></span>' +
-			'<span> data <b style="color:' + hc + '">' + health + '</b></span>';
+		var parts = [
+			[' nodes ', String(data && data.nodes ? data.nodes.length : 0)],
+			[' links ', String(data && data.links ? data.links.length : 0)],
+			[' data ', health]
+		];
+		parts.forEach(function(p, i) {
+			if (i > 0) {
+				var sep = document.createElement('span');
+				sep.textContent = ' |';
+				el.appendChild(sep);
+			}
+			var span = document.createElement('span');
+			span.textContent = p[0];
+			var b = document.createElement('b');
+			if (i === 2) b.style.color = hc;
+			b.textContent = p[1];
+			span.appendChild(b);
+			el.appendChild(span);
+		});
 	},
 
-	/* ---- refresh (5s, preserves positions) ---- */
+	/* ---- refresh (5s, preserves positions, saves new node positions) ---- */
 	refresh: function() {
 		var self = this;
 		callTopology().then(function(data) {
@@ -259,17 +419,54 @@ return view.extend({
 			self.lastNodes = data.nodes;
 			self.lastLinks = data.links || [];
 			self.lastData = data;
+
+			/* scope layout key by controller id (set once) */
+			if (!self._layoutScope)
+				for (var i = 0; i < data.nodes.length; i++)
+					if (data.nodes[i].role === 'controller') {
+						self._layoutScope = data.nodes[i].id.substring(0, 16);
+						break;
+					}
+
 			var isNew = false;
 			data.nodes.forEach(function(n) {
 				if (!self.nodePos[n.id]) isNew = true;
 			});
-			if (isNew)
-				self.autoLayout(data.nodes);
-			else
-				self.renderAll();
+			if (isNew) {
+				/* new nodes: autoLayout assigns positions but must not
+				 * move existing nodes that already have positions */
+				var newNodes = data.nodes.filter(function(n) { return !self.nodePos[n.id]; });
+				self.autoLayoutNew(newNodes, data.nodes);
+			}
+			self.renderAll();
 			self.renderDetail();
 			self.renderStatus(data);
 		}).catch(function() {});
+	},
+
+	/* place new nodes without disturbing existing positions */
+	autoLayoutNew: function(newNodes, allNodes) {
+		var self = this;
+		var ctrl = null, agents = [];
+		allNodes.forEach(function(n) {
+			if (n.role === 'controller') ctrl = n;
+			else agents.push(n);
+		});
+		var cx = self.canvasW / 2, cy = 100;
+		newNodes.forEach(function(n) {
+			if (n.role === 'controller') {
+				self.nodePos[n.id] = { x: cx, y: cy };
+			} else {
+				var idx = agents.indexOf(n);
+				var ang = Math.PI * (idx + 1) / (agents.length + 1);
+				var r = agents.length > 3 ? 200 : 160;
+				self.nodePos[n.id] = {
+					x: cx + Math.cos(ang) * r * 1.2,
+					y: cy + Math.sin(ang) * r + 120
+				};
+			}
+		});
+		self.saveLayoutDebounced();
 	},
 
 	/* ---- Pointer Events: unified mouse + touch ---- */
@@ -282,7 +479,7 @@ return view.extend({
 			var linkEl = evt.target.closest ? evt.target.closest('.topo-link') : null;
 
 			if (nodeEl) {
-				self._pointers[evt.pointerId] = { type: 'node', el: nodeEl };
+				self._pointers[evt.pointerId] = { type: 'node' };
 				self.dragTarget = nodeEl.getAttribute('data-id');
 				var pt = self.clientToSvg(evt.clientX, evt.clientY);
 				var p = self.nodePos[self.dragTarget];
@@ -292,16 +489,19 @@ return view.extend({
 				self.renderDetail();
 				self.renderAll();
 			} else if (linkEl) {
-				self._pointers[evt.pointerId] = { type: 'link', el: linkEl };
+				self._pointers[evt.pointerId] = { type: 'link' };
 				self.selectedLink = linkEl.getAttribute('data-id');
 				self.selectedNode = null;
 				self.renderDetail();
 				self.renderAll();
 			} else {
 				self._pointers[evt.pointerId] = { type: 'pan' };
-				self.dragStart = { x: evt.clientX, y: evt.clientY, px: self.pan.x, py: self.pan.y };
+				self.dragStart = {
+					x: evt.clientX, y: evt.clientY,
+					px: self.pan.x, py: self.pan.y
+				};
 			}
-			svg.setPointerCapture && svg.setPointerCapture(evt.pointerId);
+			try { svg.setPointerCapture(evt.pointerId); } catch (e) {}
 			evt.preventDefault();
 		});
 
@@ -309,41 +509,14 @@ return view.extend({
 			var ptr = self._pointers[evt.pointerId];
 			if (!ptr) return;
 
-			var ptrs = Object.keys(self._pointers).map(function(k) { return self._pointers[k]; });
-
-			/* two-finger pinch zoom */
-			if (ptrs.length === 2 && ptrs[0].type === 'pan' && ptrs[1].type === 'pan') {
-				var ids = Object.keys(self._pointers);
-				var p1 = self._pointers[ids[0]], p2 = self._pointers[ids[1]];
-				if (!p1.cx) { p1.cx = p1.lastX || evt.clientX; p1.cy = p1.lastY || evt.clientY; }
-				if (!p2.cx) { p2.cx = evt.clientX; p2.cy = evt.clientY; }
-
-				var d1 = Math.sqrt(Math.pow(p1.cx - p2.cx, 2) + Math.pow(p1.cy - p2.cy, 2));
-				var d2 = Math.sqrt(Math.pow((p1.lastX||p1.cx) - evt.clientX, 2) + Math.pow((p1.lastY||p2.cy) - evt.clientY, 2));
-
-				if (self._pinchDist > 0 && d1 > 0) {
-					var factor = d1 / self._pinchDist;
-					var nz = self.zoom * factor;
-					if (nz >= ZOOM_MIN && nz <= ZOOM_MAX) {
-						self.zoom = nz;
-						self.applyTransform();
-					}
-				}
-				self._pinchDist = d1;
-				/* update tracked positions */
-				p1.lastX = p1.cx; p1.lastY = p1.cy;
-				if (self._pointers[evt.pointerId] === p2) { p2.lastX = evt.clientX; p2.lastY = evt.clientY; }
-				else { p2.lastX = p2.cx; p2.lastY = p2.cy; }
-				return;
-			}
-
 			if (ptr.type === 'node' && self.dragTarget) {
 				var pt = self.clientToSvg(evt.clientX, evt.clientY);
 				var p = self.nodePos[self.dragTarget];
 				if (p) {
 					p.x = pt.x - self.dragStart.ox;
 					p.y = pt.y - self.dragStart.oy;
-					var el = self.svgGroup.querySelector('.topo-node[data-id="' + self.dragTarget + '"]');
+					var sel = '[data-id="' + cssEsc(self.dragTarget) + '"]';
+					var el = self.svgGroup.querySelector('.topo-node' + sel);
 					if (el) el.setAttribute('transform', 'translate(' + p.x + ',' + p.y + ')');
 					self.renderLinks();
 				}
@@ -359,13 +532,17 @@ return view.extend({
 			if (Object.keys(self._pointers).length < 2)
 				self._pinchDist = 0;
 			if (Object.keys(self._pointers).length === 0) {
+				if (self.dragTarget) self.saveLayoutDebounced(); /* save after node drag */
 				self.dragTarget = null;
 			}
 		};
 		svg.addEventListener('pointerup', endPointer);
 		svg.addEventListener('pointercancel', endPointer);
+		svg.addEventListener('pointerleave', function(evt) {
+			if (self._pointers[evt.pointerId]) endPointer(evt);
+		});
 
-		/* wheel zoom (desktop) */
+		/* wheel zoom (desktop): debounce save */
 		svg.addEventListener('wheel', function(evt) {
 			evt.preventDefault();
 			var rect = svg.getBoundingClientRect();
@@ -377,6 +554,7 @@ return view.extend({
 			self.pan.y = my - (my - self.pan.y) * (nz / self.zoom);
 			self.zoom = nz;
 			self.applyTransform();
+			self.saveLayoutDebounced();
 		}, { passive: false });
 
 		/* ESC deselect (desktop) */
@@ -406,7 +584,16 @@ return view.extend({
 		self.lastLinks = data.links || [];
 		self.lastData = data;
 
-		/* responsive: use viewport width to decide layout */
+		/* determine layout scope from controller id */
+		for (var i = 0; i < data.nodes.length; i++)
+			if (data.nodes[i].role === 'controller') {
+				self._layoutScope = data.nodes[i].id.substring(0, 16);
+				break;
+			}
+
+		/* restore saved layout before first render */
+		var restored = self.loadLayout();
+
 		var isNarrow = window.innerWidth < 768;
 
 		var toolbar = E('div', { 'style':
@@ -425,56 +612,74 @@ return view.extend({
 				'click': function() { self.fitScreen(); }
 			}, _('Fit')),
 			E('button', {
+				'class': 'btn cbi-button cbi-button-remove',
+				'style': 'padding:4px 12px;font-size:12px',
+				'click': function() { self.resetLayout(); }
+			}, _('Reset')),
+			E('button', {
 				'class': 'btn cbi-button cbi-button-neutral',
 				'style': 'padding:4px 12px;font-size:12px',
 				'click': function() { self.refresh(); }
 			}, _('↻')),
 			E('span', { 'style': 'color:#888;font-size:small;margin-left:4px' }, _('Zoom:')),
-			E('span', { 'class': 'zoom-label', 'style': 'font-size:small;font-weight:bold;min-width:36px' }, '100%')
+			E('span', { 'class': 'zoom-label', 'style': 'font-size:small;font-weight:bold;min-width:36px' },
+			  Math.round(self.zoom * 100) + '%')
 		]);
 
-		var svgInner =
-			'<g class="topo-viewport">' +
-			'<g class="link-layer"></g>' +
-			'<g class="node-layer"></g>' +
-			'</g>';
+		var NS = 'http://www.w3.org/2000/svg';
+		var svg = document.createElementNS(NS, 'svg');
+		svg.setAttribute('viewBox', '0 0 760 480');
+		svg.setAttribute('width', '100%');
+		svg.style.cssText = isNarrow
+			? 'width:100%;height:320px;display:block;touch-action:none;background:#f8f9fa;border:1px solid #e0e0e0'
+			: 'width:100%;height:100%;min-height:420px;display:block;touch-action:none;background:#f8f9fa;border:1px solid #e0e0e0';
+
+		var viewport = document.createElementNS(NS, 'g');
+		viewport.setAttribute('class', 'topo-viewport');
+		var linkLayer = document.createElementNS(NS, 'g');
+		linkLayer.setAttribute('class', 'link-layer');
+		var nodeLayer = document.createElementNS(NS, 'g');
+		nodeLayer.setAttribute('class', 'node-layer');
+		viewport.appendChild(linkLayer);
+		viewport.appendChild(nodeLayer);
+		svg.appendChild(viewport);
 
 		var canvasWrap = E('div', {
 			'style': isNarrow
 				? 'width:100%;height:320px;background:#f8f9fa;border:1px solid #e0e0e0;overflow:hidden;position:relative'
-				: 'flex:1;min-height:420px;background:#f8f9fa;border:1px solid #e0e0e0;overflow:hidden;position:relative',
-		}, E('svg', {
-			'viewBox': '0 0 760 480',
-			'width': '100%',
-			'height': '100%',
-			'style': 'display:block;touch-action:none'
-		}, svgInner));
+				: 'flex:1;min-height:420px;background:#f8f9fa;border:1px solid #e0e0e0;overflow:hidden;position:relative'
+		}, svg);
 
 		var detailPanel = E('div', {
+			'class': 'topo-detail',
 			'style': isNarrow
 				? 'width:100%;max-height:200px;background:#fff;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;padding:10px;overflow-y:auto'
 				: 'width:250px;background:#fff;border:1px solid #e0e0e0;border-left:none;border-radius:0 8px 8px 0;padding:10px;overflow-y:auto'
 		}, [
-			E('div', { 'class': 'topo-detail-body' },
-			  E('div', { 'style': 'color:#999;font-size:small;text-align:center;padding:30px 0' },
-			    _('Tap a node or link to view details')))
+			E('div', { 'class': 'topo-detail-body' })
 		]);
 
 		var mainArea = E('div', { 'style': isNarrow ? '' : 'display:flex' }, [canvasWrap, detailPanel]);
-
-		var statusBar = E('div', {
-			'class': 'topo-status',
+		var statusBar = E('div', { 'class': 'topo-status',
 			'style': 'padding:6px 12px;background:#f5f5f5;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;font-size:12px;display:flex;gap:16px;justify-content:center'
 		});
 
 		var container = E('div', {}, [toolbar, mainArea, statusBar]);
 
-		/* wire up after DOM insertion */
 		requestAnimationFrame(function() {
-			self.svgRoot = canvasWrap.querySelector('svg');
-			self.svgGroup = self.svgRoot.querySelector('.topo-viewport');
-			self.bindEvents(self.svgRoot);
-			self.autoLayout(data.nodes);
+			self.svgRoot = svg;
+			self.svgGroup = viewport;
+			self.bindEvents(svg);
+			if (!restored) {
+				self.autoLayout(data.nodes);
+			} else {
+				/* restored: place any new nodes that have no saved position */
+				var newNodes = data.nodes.filter(function(n) { return !self.nodePos[n.id]; });
+				if (newNodes.length > 0) self.autoLayoutNew(newNodes, data.nodes);
+				self.applyTransform();
+				self.renderAll();
+			}
+			self.renderDetail();
 			self.renderStatus(data);
 			poll.add(L.bind(self.refresh, self), POLL_INTERVAL);
 		});

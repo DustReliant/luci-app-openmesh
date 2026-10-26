@@ -282,3 +282,6 @@ msgstr "链路"
 
 msgid "Topology is rendered on the controller."
 msgstr "拓扑在控制器上呈现。"
+
+msgid "Reset"
+msgstr "重置布局"
