@@ -267,3 +267,18 @@ msgstr "RSSI"
 
 msgid "TX Rate"
 msgstr "发送速率"
+
+msgid "Tap a node or link to view details"
+msgstr "点击节点或链路查看详情"
+
+msgid "Layout"
+msgstr "布局"
+
+msgid "Fit"
+msgstr "适应"
+
+msgid "Link"
+msgstr "链路"
+
+msgid "Topology is rendered on the controller."
+msgstr "拓扑在控制器上呈现。"
