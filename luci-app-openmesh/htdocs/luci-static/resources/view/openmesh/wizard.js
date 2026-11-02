@@ -6,14 +6,36 @@
 'require ui';
 
 var callMeshCreate = rpc.declare({ object: 'openmesh', method: 'mesh_create',
-				   params: [ 'mesh_name', 'band', 'key', 'mode' ] });
+				   params: [ 'mesh_name', 'band', 'key', 'mode', 'lan_ports' ] });
+var callLanPorts    = rpc.declare({ object: 'openmesh', method: 'get_lan_ports' });
 var callRoaming    = rpc.declare({ object: 'openmesh', method: 'roaming_apply' });
 var callConfirm    = rpc.declare({ object: 'openmesh', method: 'apply_confirm' });
 var callRollback   = rpc.declare({ object: 'openmesh', method: 'apply_rollback' });
 
+/* dropdown entries: physical br-lan members only (m19) */
+function lanPortOptions(ports) {
+	var seen = {};
+	return (ports || []).filter(function(p) {
+		if (!p || seen[p] || /^om_/.test(p) ||
+		    !/^[A-Za-z0-9_]{1,15}$/.test(p))
+			return false;
+		seen[p] = true;
+		return true;
+	});
+}
+
 return view.extend({
-	render: function() {
-		var nameInput, bandSel, modeSel, keyInput, statusLine;
+	load: function() {
+		return L.resolveDefault(callLanPorts(), { ports: [] });
+	},
+
+	render: function(data) {
+		var nameInput, bandSel, modeSel, keyInput, lanPortsSel, statusLine;
+
+		function syncLanPorts() {
+			/* wired leg only exists under batman-adv (mode B) */
+			lanPortsSel.disabled = (modeSel.value !== 'hybrid');
+		}
 
 		function setCountdown(reply) {
 			var left = reply.confirm_window || 30;
@@ -44,7 +66,9 @@ return view.extend({
 				return callMeshCreate(nameInput.value.trim(),
 						      bandSel.value,
 						      keyInput.value || '',
-						      modeSel.value)
+						      modeSel.value,
+						      lanPortsSel.disabled ?
+							      '' : lanPortsSel.value)
 					.then(setCountdown);
 			}
 		}, _('Create mesh (30s auto-rollback)'));
@@ -122,13 +146,32 @@ return view.extend({
 					  _('Backhaul mode')),
 					E('div', { 'class': 'cbi-value-field' },
 						modeSel = E('select', {
-							'class': 'cbi-input-select'
+							'class': 'cbi-input-select',
+							'change': syncLanPorts
 						}, [
 							E('option', { 'value': 'wifi' },
 							  _('Wireless only (802.11s)')),
 							E('option', { 'value': 'hybrid' },
 							  _('Hybrid (+batman-adv)'))
 						]))
+				]),
+				E('div', { 'class': 'cbi-value' }, [
+					E('label', { 'class': 'cbi-value-title' },
+					  _('Wired backhaul LAN port')),
+					E('div', { 'class': 'cbi-value-field' },
+						lanPortsSel = E('select', {
+							'class': 'cbi-input-select',
+							'disabled': true
+						}, [
+							E('option', { 'value': '' },
+							  _('No wired backhaul')),
+							E('option', { 'value': 'all' },
+							  _('All LAN ports'))
+						].concat(lanPortOptions(data.ports).map(
+							function(p) {
+								return E('option',
+									{ 'value': p }, p);
+							}))))
 				]),
 				E('div', { 'class': 'cbi-value' }, [
 					E('label', { 'class': 'cbi-value-title' },

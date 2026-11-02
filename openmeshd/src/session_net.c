@@ -27,6 +27,7 @@
 #include "store.h"
 #include "netconf.h"
 #include "discovery.h"
+#include "lanports.h"
 
 #define OM_HS_TIMEOUT 10	/* seconds per handshake step */
 #define OM_KA_PERIOD  15
@@ -564,6 +565,7 @@ static void agent_rx_cb(struct uloop_fd *fd, unsigned int events)
 		}
 		if (t == OM_SES_CONFIG && agent_netconf) {
 			char mesh_id[33], band[8], key[33], mode[8];
+			char lan_ports[OM_PORTS_SPEC_MAX + 1] = "";
 			int bh = OM_BH_WIFI;
 
 			if (om_json_get_str((const char *)pt, ptlen,
@@ -578,14 +580,28 @@ static void agent_rx_cb(struct uloop_fd *fd, unsigned int events)
 						    sizeof(mode)) == 0 &&
 				    !strcmp(mode, "hybrid"))
 					bh = OM_BH_HYBRID;
+				om_json_get_str((const char *)pt, ptlen,
+						"lan_ports", lan_ports,
+						sizeof(lan_ports));
+				if (!om_lan_ports_valid(lan_ports)) {
+					/* cross-device port names may not
+					 * resolve here; garbage never
+					 * reaches the shell (m19) */
+					ULOG_WARN("session: bad lan_ports "
+						  "spec, wired leg "
+						  "skipped\n");
+					lan_ports[0] = '\0';
+				}
 				ULOG_NOTE("session: mesh config received, "
-					  "applying (mode=%s)\n",
+					  "applying (mode=%s%s%s)\n",
 					  bh == OM_BH_HYBRID ? "hybrid"
-							     : "wifi");
+							     : "wifi",
+					  *lan_ports ? " lan_ports=" : "",
+					  lan_ports);
 				om_netconf_mesh_apply(agent_netconf,
 						      agent_state_dir,
 						      mesh_id, band, key,
-						      bh);
+						      bh, lan_ports);
 			}
 			return;
 		}
@@ -676,15 +692,18 @@ void om_snet_set_netconf(struct om_snet *s, struct om_netconf *nc,
 }
 
 void om_snet_push_mesh(struct om_snet *s, const char *mesh_id,
-		       const char *band, const char *key, const char *mode)
+		       const char *band, const char *key, const char *mode,
+		       const char *lan_ports)
 {
-	char json[224];
+	char json[288];
 	uint8_t out[OM_SES_MAX_FRAME];
 	size_t n;
 	int len = snprintf(json, sizeof(json),
 			   "{\"mesh_id\":\"%s\",\"band\":\"%s\","
-			   "\"key\":\"%s\",\"mode\":\"%s\"}",
-			   mesh_id, band, key, mode ? mode : "wifi");
+			   "\"key\":\"%s\",\"mode\":\"%s\","
+			   "\"lan_ports\":\"%s\"}",
+			   mesh_id, band, key, mode ? mode : "wifi",
+			   lan_ports ? lan_ports : "");
 
 	if (len <= 0 || (size_t)len >= sizeof(json))
 		return;

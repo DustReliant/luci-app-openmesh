@@ -13,6 +13,7 @@
 #include <libubox/ulog.h>
 
 #include "identity.h"
+#include "lanports.h"
 #include "store.h"
 
 #define OM_UCI_PKG "openmesh"
@@ -236,7 +237,7 @@ int om_store_foreach(int (*cb)(const struct om_stored_node *n, void *priv),
 }
 
 int om_store_backhaul_set(const char *mesh_id, const char *mesh_key,
-			  const char *band)
+			  const char *band, const char *lan_ports)
 {
 	struct uci_context *c = uci_alloc_context();
 	struct uci_package *p = NULL;
@@ -271,6 +272,10 @@ int om_store_backhaul_set(const char *mesh_id, const char *mesh_key,
 	ptr.option = "mesh_id";	ptr.value = mesh_id;	uci_set(c, &ptr);
 	ptr.option = "mesh_key";	ptr.value = mesh_key;	uci_set(c, &ptr);
 	ptr.option = "band";		ptr.value = band;	uci_set(c, &ptr);
+	ptr.option = "lan_ports";
+	ptr.value = (lan_ports && om_lan_ports_valid(lan_ports)) ?
+		    lan_ports : "";
+	uci_set(c, &ptr);
 
 	uci_save(c, p);
 	if (uci_commit(c, &p, false) == UCI_OK)
@@ -281,7 +286,8 @@ out:
 }
 
 int om_store_backhaul_get(char *mesh_id, size_t id_sz, char *mesh_key,
-			  size_t key_sz, char *band, size_t band_sz)
+			  size_t key_sz, char *band, size_t band_sz,
+			  char *lan_ports, size_t ports_sz)
 {
 	struct uci_context *c = uci_alloc_context();
 	struct uci_package *p = NULL;
@@ -289,6 +295,8 @@ int om_store_backhaul_get(char *mesh_id, size_t id_sz, char *mesh_key,
 	int found = -1;
 
 	mesh_id[0] = mesh_key[0] = band[0] = '\0';
+	if (lan_ports && ports_sz)
+		lan_ports[0] = '\0';
 	if (!c)
 		return -1;
 	if (uci_load(c, OM_UCI_PKG, &p) == UCI_OK) {
@@ -307,12 +315,60 @@ int om_store_backhaul_get(char *mesh_id, size_t id_sz, char *mesh_key,
 			o = uci_lookup_option(c, t, "band");
 			if (o && o->type == UCI_TYPE_STRING)
 				snprintf(band, band_sz, "%s", o->v.string);
+			o = uci_lookup_option(c, t, "lan_ports");
+			if (o && o->type == UCI_TYPE_STRING)
+				snprintf(lan_ports, ports_sz, "%s",
+					 o->v.string);
 			found = 0;
 			break;
 		}
 	}
 	uci_free_context(c);
 	return found;
+}
+
+int om_store_lan_ports(char out[][OM_PORT_LEN], int max)
+{
+	struct uci_context *c = uci_alloc_context();
+	struct uci_package *p = NULL;
+	struct uci_element *e;
+	int n = 0;
+
+	if (!c)
+		return 0;
+	if (uci_load(c, "network", &p) == UCI_OK) {
+		uci_foreach_element(&p->sections, e) {
+			struct uci_section *t = uci_to_section(e);
+			struct uci_option *nm, *o;
+
+			nm = uci_lookup_option(c, t, "name");
+			if (!nm || nm->type != UCI_TYPE_STRING ||
+			    strcmp(nm->v.string, "br-lan"))
+				continue;
+			o = uci_lookup_option(c, t, "ports");
+			if (o && o->type == UCI_TYPE_LIST) {
+				struct uci_element *pe;
+
+				uci_foreach_element(&o->v.list, pe) {
+					if (!strncmp(pe->name, "om_", 3))
+						continue;
+					if (n < max)
+						snprintf(out[n], OM_PORT_LEN,
+							 "%s", pe->name);
+					n++;
+				}
+			} else if (o && o->type == UCI_TYPE_STRING &&
+				   strcmp(o->v.string, "om_bat")) {
+				if (n < max)
+					snprintf(out[n], OM_PORT_LEN, "%s",
+						 o->v.string);
+				n++;
+			}
+			break;		/* only one br-lan device section */
+		}
+	}
+	uci_free_context(c);
+	return n;
 }
 
 void om_store_backhaul_mode(char *mode, size_t mode_sz)

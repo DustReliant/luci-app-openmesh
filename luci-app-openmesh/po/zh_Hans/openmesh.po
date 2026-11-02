@@ -321,3 +321,12 @@ msgstr "接收速率"
 
 msgid "more clients"
 msgstr "更多客户端"
+
+msgid "Wired backhaul LAN port"
+msgstr "有线回程 LAN 口"
+
+msgid "No wired backhaul"
+msgstr "不使用有线"
+
+msgid "All LAN ports"
+msgstr "全部 LAN 口"

@@ -29,13 +29,24 @@ int om_store_remove(const uint8_t id[32]);
 int om_store_foreach(int (*cb)(const struct om_stored_node *n, void *priv),
 		     void *priv);
 
-/* Mesh backhaul parameters (named section "backhaul"). */
+/* Mesh backhaul parameters (named section "backhaul"). lan_ports is the
+ * m19 wired-leg selection spec (""/all/named list); always written so a
+ * re-create clears a stale selection. */
 int om_store_backhaul_set(const char *mesh_id, const char *mesh_key,
-			  const char *band);
+			  const char *band, const char *lan_ports);
 int om_store_backhaul_get(char *mesh_id, size_t id_sz, char *mesh_key,
-			  size_t key_sz, char *band, size_t band_sz);
+			  size_t key_sz, char *band, size_t band_sz,
+			  char *lan_ports, size_t ports_sz);
 
 /* Backhaul mode: "hybrid" if network has a batadv proto iface, else "wifi". */
 void om_store_backhaul_mode(char *mode, size_t mode_sz);
+
+/* Current br-lan bridge member ports (om_* virtual members excluded),
+ * read from the network device section named br-lan. Fills out (each
+ * OM_PORT_LEN bytes), returns the number of entries found (may exceed
+ * max; only max are stored). Dynamic per workflow §7: no hardcoded
+ * port names anywhere. */
+#define OM_PORT_LEN 16
+int om_store_lan_ports(char out[][OM_PORT_LEN], int max);
 
 #endif /* OPENMESH_STORE_H */

@@ -103,9 +103,12 @@ void om_snet_done(struct om_snet *s);
 void om_snet_set_netconf(struct om_snet *s, struct om_netconf *nc,
 			 const char *state_dir);
 
-/* Controller: push mesh config to all established peers. */
+/* Controller: push mesh config to all established peers. lan_ports is
+ * the m19 wired-leg selection ("" = none); charset-restricted upstream
+ * so it is JSON/env safe. */
 void om_snet_push_mesh(struct om_snet *s, const char *mesh_id,
-		       const char *band, const char *key, const char *mode);
+		       const char *band, const char *key, const char *mode,
+		       const char *lan_ports);
 
 /* Controller: queue a discovered node for adoption (user action). */
 int om_snet_adopt(struct om_snet *s, const uint8_t id[OM_ID_LEN],

@@ -12,6 +12,7 @@
 - ✅ 已领养节点持久化（UCI）与重启恢复
 - ✅ 一键创建/加入 802.11s Mesh（原生 UCI 配置，SAE 加密）
 - ✅ hybrid 模式（802.11s + batman-adv）双机自动建立
+- ✅ 有线回程 LAN 口选择（hybrid 建网时下拉指定口/全部口做 batman 回程，其余口留给终端；30s 回滚含端口复原）
 - ✅ 配置事务安全网：30 秒不确认自动回滚（含掉电恢复）
 - ✅ 已提交配置受回滚保护（快照感知清理）
 
@@ -86,7 +87,8 @@ ubus call openmesh get_links       # 回程链路（含采集健康）
 ubus call openmesh get_clients     # AP 客户端
 ubus call openmesh get_mesh_info   # Mesh 配置信息
 ubus call openmesh topology        # 统一拓扑快照
-ubus call openmesh mesh_create     # 创建 Mesh（事务）
+ubus call openmesh mesh_create     # 创建 Mesh（事务，可带 lan_ports='lan1'/all）
+ubus call openmesh get_lan_ports   # 当前 br-lan 物理口列表（向导下拉数据源）
 ubus call openmesh apply_confirm   # 确认配置
 ubus call openmesh adopt           # 领养节点
 ```
@@ -123,9 +125,11 @@ tests/                   # 自动化测试
 node tests/test_topology_frontend.js   # 布局持久化+安全 23 项
 node tests/test_phase62.js             # 智能布局+双链路 22 项
 node tests/test_topology_clients.js    # 客户端画布渲染 13 项
+node tests/test_wizard_lanports.js     # 向导 LAN 口下拉 9 项
 
-# 命令层测试（假 batctl）
+# 命令层测试（假 batctl / 假 uci）
 ./tests/test_batman_cmdlayer.sh
+./tests/test_hybrid_lanports.sh       # 有线腿编排 31 项（真实脚本+fake uci）
 
 # 真机部署后冒烟
 ./tests/smoke.sh /path/to/sdk
@@ -169,5 +173,6 @@ GPL-3.0-or-later（依赖 libsodium 为 ISC、libubox/libubus 为 LGPL-2.1）
 | [roadmap.md](docs/roadmap.md) | 版本路线图 |
 | [v0.2-plan.md](docs/design/v0.2-plan.md) | V0.2 里程碑 + 真机验证记录 |
 | [m18-topology-model.md](docs/design/m18-topology-model.md) | 统一拓扑模型设计 |
+| [m19-wired-lan-select.md](docs/design/m19-wired-lan-select.md) | 有线回程 LAN 口选择（Phase 6.3 + 自动识别路线） |
 | [scripts/openwrt-patches/](scripts/openwrt-patches/) | rtl8188ee 驱动补丁 + 自编译指南 |
 | [ADR 列表](docs/decisions/) | 架构决策记录（8 篇） |

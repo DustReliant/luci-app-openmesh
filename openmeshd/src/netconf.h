@@ -15,6 +15,10 @@
 #define OM_BAT_IF  "om_bat"	/* proto batadv soft interface */
 #define OM_MESH_IF "om_mesh"	/* proto batadv_hardif carrier */
 
+/* mode B network orchestration script (shipped in the ipk; m19 keeps
+ * the shell logic executable-identical under host tests) */
+#define OM_HYBRID_SCRIPT "/usr/share/openmesh/hybrid-netconf.sh"
+
 /* backhaul modes (ADR-0002) */
 #define OM_BH_WIFI   0		/* mode A: 802.11s bridged to lan */
 #define OM_BH_HYBRID 1		/* mode B: 802.11s + wired under batman-adv */
@@ -38,11 +42,15 @@ struct om_netconf {
  * (mode B), commit and reload. Without om_netconf_confirm() within
  * OM_TXN_TIMEOUT seconds everything is restored.
  * band: "5g" | "2g" | "auto". mode: OM_BH_WIFI | OM_BH_HYBRID.
+ * lan_ports (mode B only, m19): ""/NULL = no wired leg, "all" = every
+ * br-lan physical port, "lan1,lan2" = named ports become om_eth_<port>
+ * batadv_hardif sections (validated by om_lan_ports_valid upstream).
  * Returns 0 / -1.
  */
 int om_netconf_mesh_apply(struct om_netconf *nc, const char *state_dir,
 			  const char *mesh_id, const char *band,
-			  const char *sae_key, int mode);
+			  const char *sae_key, int mode,
+			  const char *lan_ports);
 
 /*
  * Apply 802.11k/v/r roaming options to all AP-mode wifi-ifaces under

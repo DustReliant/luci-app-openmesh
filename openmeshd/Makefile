@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=openmeshd
 PKG_VERSION:=0.0.1
-PKG_RELEASE:=18
+PKG_RELEASE:=19
 PKG_LICENSE:=GPL-3.0-or-later
 PKG_MAINTAINER:=DustReliant <https://github.com/DustReliant>
 
@@ -51,6 +51,7 @@ define Build/Compile
 		$(PKG_BUILD_DIR)/batman_parse.c \
 		$(PKG_BUILD_DIR)/batman_collect.c \
 		$(PKG_BUILD_DIR)/topology.c \
+		$(PKG_BUILD_DIR)/lanports.c \
 		$(TARGET_LDFLAGS) -lubox -lubus -lblobmsg_json -lsodium -luci
 endef
 
@@ -61,6 +62,8 @@ define Package/openmeshd/install
 	$(INSTALL_CONF) ./files/etc/config/openmesh $(1)/etc/config/
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./files/etc/init.d/openmeshd $(1)/etc/init.d/
+	$(INSTALL_DIR) $(1)/usr/share/openmesh
+	$(INSTALL_BIN) ./files/usr/share/openmesh/hybrid-netconf.sh $(1)/usr/share/openmesh/
 endef
 
 define Package/openmeshd/conffiles

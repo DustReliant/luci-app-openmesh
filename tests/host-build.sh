@@ -90,6 +90,16 @@ cc $CFLAGS_extra -I"$SRC" -I"$BUILD" -Wall -Wextra -std=c11 \
 	"$REPO/tests/test_topology.c" "$SRC/topology.c"
 "$BUILD/test_topology"
 
+# m19 wired-backhaul port spec (pure validation helpers)
+# shellcheck disable=SC2086
+cc $CFLAGS_extra -I"$SRC" -I"$BUILD" -Wall -Wextra -std=c11 \
+	-o "$BUILD/test_lanports" \
+	"$REPO/tests/test_lanports.c" "$SRC/lanports.c"
+"$BUILD/test_lanports"
+
+# m19 hybrid wired-leg orchestration (fake uci runs the real script)
+"$REPO/tests/test_hybrid_lanports.sh"
+
 # shellcheck disable=SC2086
 cc $CFLAGS_extra -I"$SRC" -I"$BUILD" -Wall -Wextra -std=c11 \
 	-o "$BUILD/test_discovery" \

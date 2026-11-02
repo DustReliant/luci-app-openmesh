@@ -7,8 +7,8 @@
  * into lan (ADR-0002). Snapshot -> apply -> confirm-window -> restore.
  *
  * wireless edits go through libuci; network edits (mode B, named
- * sections only) go through idempotent uci-CLI shell calls - a V0.1
- * simplification, one transaction at a time, no concurrent writer.
+ * sections only) go through OM_HYBRID_SCRIPT - one transaction at a
+ * time, no concurrent writer.
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -18,12 +18,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <uci.h>
 
 #include <libubox/ulog.h>
 
+#include "lanports.h"
 #include "netconf.h"
 
 #define TXN_MARKER "txn.pending"
@@ -127,37 +129,38 @@ static void drop_om_sections(struct uci_context *c, struct uci_package *p,
 	}
 }
 
-/* idempotent mode B network config via uci CLI */
-static int apply_network_hybrid(void)
-{	const char *cmds[] = {
-		"uci -q set network." OM_BAT_IF "=interface",
-		"uci -q set network." OM_BAT_IF ".proto='batadv'",
-		"uci -q set network." OM_BAT_IF ".om_managed='1'",
-		"uci -q set network." OM_MESH_IF "=interface",
-		"uci -q set network." OM_MESH_IF ".proto='batadv_hardif'",
-		"uci -q set network." OM_MESH_IF ".master='" OM_BAT_IF "'",
-		"uci -q set network." OM_MESH_IF ".om_managed='1'",
-		/* add om_bat to br-lan ports once */
-		"BR=$(uci -q show network | sed -n "
-		"\"s/network\\.\\([^.]*\\)\\.name='br-lan'/\\1/p\"); "
-		"[ -n \"$BR\" ] && ! uci -q get network.$BR.ports | "
-		"grep -q '" OM_BAT_IF "' && "
-		"uci -q add_list network.$BR.ports='" OM_BAT_IF "'",
-		"uci -q commit network",
-		NULL
-	};
+/* mode B network orchestration lives in OM_HYBRID_SCRIPT (m19) so the
+ * exact production shell runs under host tests with a fake uci; the
+ * port selection travels via the environment, never the command string */
+static int apply_network_hybrid(const char *lan_ports)
+{
+	int rc;
 
-	for (int i = 0; cmds[i]; i++)
-		if (system(cmds[i]) != 0) {
-			ULOG_WARN("netconf: cmd failed: %s\n", cmds[i]);
-			return -1;
+	if (lan_ports && *lan_ports) {
+		if (!om_lan_ports_valid(lan_ports)) {
+			ULOG_WARN("netconf: invalid lan_ports spec, wired "
+				  "leg skipped\n");
+			lan_ports = "";
 		}
+	}
+	if (lan_ports && *lan_ports)
+		setenv("OM_LAN_PORTS", lan_ports, 1);
+	else
+		unsetenv("OM_LAN_PORTS");
+	rc = system("sh " OM_HYBRID_SCRIPT);
+	unsetenv("OM_LAN_PORTS");
+	if (rc == -1 || !WIFEXITED(rc) || WEXITSTATUS(rc) != 0) {
+		ULOG_WARN("netconf: %s failed (rc=%d)\n", OM_HYBRID_SCRIPT,
+			  rc);
+		return -1;
+	}
 	return 0;
 }
 
 int om_netconf_mesh_apply(struct om_netconf *nc, const char *state_dir,
 			  const char *mesh_id, const char *band,
-			  const char *sae_key, int mode)
+			  const char *sae_key, int mode,
+			  const char *lan_ports)
 {
 	struct uci_context *cw = NULL;
 	struct uci_package *pw = NULL;
@@ -237,8 +240,8 @@ int om_netconf_mesh_apply(struct om_netconf *nc, const char *state_dir,
 	uci_free_context(cw);
 	cw = NULL;
 
-	/* ---- network (mode B, uci CLI) ---- */
-	if (mode == OM_BH_HYBRID && apply_network_hybrid() < 0)
+	/* ---- network (mode B, orchestration script) ---- */
+	if (mode == OM_BH_HYBRID && apply_network_hybrid(lan_ports) < 0)
 		goto fail;
 
 	reload_network();
@@ -500,7 +503,8 @@ static bool snapshot_has_om(const char *path)
 		return false;
 	while (fgets(buf, sizeof(buf), f)) {
 		if (strstr(buf, "om_managed") ||
-		    strstr(buf, "om_bat") || strstr(buf, "om_mesh")) {
+		    strstr(buf, "om_bat") || strstr(buf, "om_mesh") ||
+		    strstr(buf, "om_eth")) {
 			found = true;
 			break;
 		}
@@ -516,7 +520,10 @@ static void purge_om_sections(void)
 		"grep om_managed | head -1 | cut -d. -f2 | cut -d= -f1); "
 		"uci -q commit wireless; done");
 	system("uci -q delete network.om_bat; uci -q delete network.om_mesh; "
-		"uci -q commit network 2>/dev/null");
+	       "for S in $(uci -q show network 2>/dev/null | "
+	       "sed -n \"s/^network\\.\\(om_eth_[A-Za-z0-9_]*\\)=interface$/"
+	       "\\1/p\"); do uci -q delete network.$S; done; "
+	       "uci -q commit network 2>/dev/null");
 }
 
 int om_netconf_rollback(struct om_netconf *nc)

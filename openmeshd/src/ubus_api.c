@@ -5,6 +5,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 
 #include <libubus.h>
@@ -20,6 +21,7 @@
 #include "store.h"
 #include "monitor.h"
 #include "topology.h"
+#include "lanports.h"
 
 
 static struct blob_buf b;
@@ -29,11 +31,12 @@ static const struct blobmsg_policy om_adopt_policy[2] = {
 	{ "id", BLOBMSG_TYPE_STRING },
 };
 
-static const struct blobmsg_policy om_mesh_policy[4] = {
+static const struct blobmsg_policy om_mesh_policy[5] = {
 	{ "mesh_name", BLOBMSG_TYPE_STRING },
 	{ "band", BLOBMSG_TYPE_STRING },
 	{ "key", BLOBMSG_TYPE_STRING },
 	{ "mode", BLOBMSG_TYPE_STRING },
+	{ "lan_ports", BLOBMSG_TYPE_STRING },
 };
 
 static const struct blobmsg_policy om_roam_policy[4] = {
@@ -239,38 +242,73 @@ static void gen_key(char out[13])
 	out[sizeof(rnd)] = '\0';
 }
 
+/* m19: named lan ports must exist here (typo guard); "all"/"" skip this */
+struct om_port_chk {
+	bool ok;
+};
+
+static void port_exists_cb(const char *port, size_t len, void *priv)
+{
+	struct om_port_chk *c = priv;
+	char name[OM_PORT_NAME_MAX + 1];
+	char path[48];
+	struct stat st;
+
+	if (len == 0 || len >= sizeof(name)) {
+		c->ok = false;
+		return;
+	}
+	memcpy(name, port, len);
+	name[len] = '\0';
+	snprintf(path, sizeof(path), "/sys/class/net/%s", name);
+	if (stat(path, &st) < 0) {
+		ULOG_WARN("mesh_create: lan port '%s' not present\n", name);
+		c->ok = false;
+	}
+}
+
 static int om_mesh_create(struct ubus_context *ctx, struct ubus_object *obj,
 			  struct ubus_request_data *req, const char *method,
 			  struct blob_attr *msg)
 {
 	struct om_ubus *u = OM_HANDLER_CTX(obj);
-	struct blob_attr *tb[4] = { NULL, NULL, NULL, NULL };
-	const char *name, *band, *key, *mode;
+	struct blob_attr *tb[5] = { NULL, NULL, NULL, NULL, NULL };
+	struct om_port_chk chk = { .ok = true };
+	const char *name, *band, *key, *mode, *lan_ports;
 	int bh_mode = OM_BH_WIFI;
 	char gen[13];
 
 	(void)method;
 	if (!u->snet || !u->netconf)
 		return UBUS_STATUS_NOT_FOUND;
-	blobmsg_parse(om_mesh_policy, 4, tb, blob_data(msg), blob_len(msg));
+	blobmsg_parse(om_mesh_policy, 5, tb, blob_data(msg), blob_len(msg));
 	name = tb[0] ? blobmsg_get_string(tb[0]) : NULL;
 	band = tb[1] ? blobmsg_get_string(tb[1]) : "5g";
 	key = tb[2] ? blobmsg_get_string(tb[2]) : "";
 	mode = tb[3] ? blobmsg_get_string(tb[3]) : "wifi";
+	lan_ports = tb[4] ? blobmsg_get_string(tb[4]) : "";
 	if (!name || !*name)
 		return UBUS_STATUS_INVALID_ARGUMENT;
 	if (!strcmp(mode, "hybrid"))
 		bh_mode = OM_BH_HYBRID;
+	if (!om_lan_ports_valid(lan_ports))
+		return UBUS_STATUS_INVALID_ARGUMENT;
+	if (bh_mode == OM_BH_HYBRID && *lan_ports &&
+	    strcmp(lan_ports, OM_PORTS_ALL)) {
+		om_lan_ports_each(lan_ports, port_exists_cb, &chk);
+		if (!chk.ok)
+			return UBUS_STATUS_INVALID_ARGUMENT;
+	}
 	if (!*key) {
 		gen_key(gen);
 		key = gen;
 	}
-	if (om_store_backhaul_set(name, key, band) < 0)
+	if (om_store_backhaul_set(name, key, band, lan_ports) < 0)
 		ULOG_WARN("mesh_create: persisting backhaul failed\n");
 	if (om_netconf_mesh_apply(u->netconf, u->state_dir, name, band, key,
-				  bh_mode) < 0)
+				  bh_mode, lan_ports) < 0)
 		return UBUS_STATUS_UNKNOWN_ERROR;
-	om_snet_push_mesh(u->snet, name, band, key, mode);
+	om_snet_push_mesh(u->snet, name, band, key, mode, lan_ports);
 
 	blob_buf_init(&b, 0);
 	blobmsg_add_string(&b, "result", "applied");
@@ -284,19 +322,20 @@ static int om_mesh_join(struct ubus_context *ctx, struct ubus_object *obj,
 			struct blob_attr *msg)
 {
 	struct om_ubus *u = OM_HANDLER_CTX(obj);
-	char mesh_id[33], key[33], band[8];
+	char mesh_id[33], key[33], band[8], lan_ports[OM_PORTS_SPEC_MAX + 1];
 
 	(void)method;
 	(void)msg;
 	if (!u->netconf)
 		return UBUS_STATUS_NOT_FOUND;
 	if (om_store_backhaul_get(mesh_id, sizeof(mesh_id), key,
-				  sizeof(key), band, sizeof(band)) < 0 ||
+				  sizeof(key), band, sizeof(band),
+				  lan_ports, sizeof(lan_ports)) < 0 ||
 	    !*mesh_id)
 		return UBUS_STATUS_NOT_FOUND;
 	if (om_netconf_mesh_apply(u->netconf, u->state_dir, mesh_id,
 				  *band ? band : "5g", key,
-				  OM_BH_WIFI) < 0)
+				  OM_BH_WIFI, lan_ports) < 0)
 		return UBUS_STATUS_UNKNOWN_ERROR;
 	blob_buf_init(&b, 0);
 	blobmsg_add_string(&b, "result", "applied");
@@ -549,12 +588,14 @@ static int om_get_mesh_info(struct ubus_context *ctx, struct ubus_object *obj,
 {
 	struct om_ubus *u = OM_HANDLER_CTX(obj);
 	char mesh_id[33], mesh_key[33], band[8];
+	char lan_ports[OM_PORTS_SPEC_MAX + 1];
 
 	(void)method;
 	(void)msg;
 	blob_buf_init(&b, 0);
 	if (om_store_backhaul_get(mesh_id, sizeof(mesh_id), mesh_key,
-				  sizeof(mesh_key), band, sizeof(band)) == 0 &&
+				  sizeof(mesh_key), band, sizeof(band),
+				  lan_ports, sizeof(lan_ports)) == 0 &&
 	    *mesh_id) {
 		char mode[8];
 
@@ -564,12 +605,34 @@ static int om_get_mesh_info(struct ubus_context *ctx, struct ubus_object *obj,
 		blobmsg_add_string(&b, "band", band);
 		blobmsg_add_string(&b, "mode", mode);
 		blobmsg_add_u8(&b, "key_set", !!*mesh_key);
+		blobmsg_add_string(&b, "lan_ports", lan_ports);
 		if (u->mon && u->mon->mesh_ifname[0])
 			blobmsg_add_string(&b, "mesh_ifname",
 					   u->mon->mesh_ifname);
 	} else {
 		blobmsg_add_u8(&b, "configured", 0);
 	}
+	return ubus_send_reply(ctx, req, b.head);
+}
+
+/* m19: current br-lan bridge members for the wizard dropdown */
+static int om_get_lan_ports(struct ubus_context *ctx, struct ubus_object *obj,
+			    struct ubus_request_data *req,
+			    const char *method, struct blob_attr *msg)
+{
+	char ports[8][OM_PORT_LEN];
+	void *a;
+	int n, i;
+
+	(void)obj;
+	(void)method;
+	(void)msg;
+	n = om_store_lan_ports(ports, 8);
+	blob_buf_init(&b, 0);
+	a = blobmsg_open_array(&b, "ports");
+	for (i = 0; i < n && i < 8; i++)
+		blobmsg_add_string(&b, NULL, ports[i]);
+	blobmsg_close_array(&b, a);
 	return ubus_send_reply(ctx, req, b.head);
 }
 
@@ -625,6 +688,7 @@ static const struct ubus_method om_methods[] = {
 	UBUS_METHOD_NOARG("get_clients", om_get_clients),
 	UBUS_METHOD_NOARG("topology", om_topology),
 	UBUS_METHOD_NOARG("get_mesh_info", om_get_mesh_info),
+	UBUS_METHOD_NOARG("get_lan_ports", om_get_lan_ports),
 	UBUS_METHOD("roaming_apply", om_roaming_apply, om_roam_policy),
 };
 
