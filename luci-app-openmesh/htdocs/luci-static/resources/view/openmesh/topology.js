@@ -15,6 +15,7 @@
 'require poll';
 
 var callTopology = rpc.declare({ object: 'openmesh', method: 'topology' });
+var callClients = rpc.declare({ object: 'openmesh', method: 'get_clients' });
 
 /* ---- design tokens ---- */
 var ZOOM_MIN = 0.25, ZOOM_MAX = 3.5;
@@ -26,6 +27,11 @@ var STORAGE_KEY_PREFIX = 'openmesh-topo-layout-';
 var LEVEL_GAP = 160;          /* vertical distance between BFS levels */
 var SIBLING_GAP = 220;        /* horizontal distance between same-level nodes */
 var FIT_PADDING = 50;
+var CLIENT_R = 16;           /* client node radius */
+/* fan geometry: adjacent chord = 2*FAN_R*sin(PI/(2*(MAX_SHOW+1))) must
+ * exceed 2*CLIENT_R, else circles overlap: 100/8 → 34.7px > 32px */
+var CLIENT_FAN_R = 100;      /* distance from AP anchor to client fan */
+var CLIENT_MAX_SHOW = 8;     /* max clients to render per AP (overflow: summary) */
 
 function esc(s) {
 	return String(s || '').replace(/&/g, '&amp;')
@@ -54,6 +60,8 @@ return view.extend({
 	svgRoot: null, svgGroup: null,
 	canvasW: 800, canvasH: 560,
 	lastNodes: null, lastLinks: null, lastData: null,
+	lastClients: null,
+	selectedClient: null,
 	_pointers: {}, _pinchDist: 0,
 	_layoutScope: '', _saveTimer: null,
 
@@ -266,6 +274,21 @@ return view.extend({
 
 	/* ==================== rendering (P0: modern cards + dual-link curves) ======== */
 
+	clientColor: function(rssi) {
+		if (!rssi || rssi >= -60) return '#4CAF50';
+		if (rssi >= -75) return '#FF9800';
+		return '#F44336';
+	},
+
+	/* compute client position: fan below the AP card, symmetric around it */
+	clientPos: function(apPos, index, total) {
+		var ang = Math.PI * (index + 1) / (total + 1);
+		return {
+			x: apPos.x + Math.cos(ang) * CLIENT_FAN_R,
+			y: apPos.y + Math.sin(ang) * CLIENT_FAN_R + NODE_H / 2
+		};
+	},
+
 	statusColor: function(n) {
 		if (n.status === 'online') return '#4CAF50';
 		if (n.status === 'offline') return '#F44336';
@@ -274,8 +297,9 @@ return view.extend({
 
 	renderAll: function() {
 		if (!this.svgGroup || !this.lastNodes) return;
-		this.renderNodes();
 		this.renderLinks();
+		this.renderNodes();
+		this.renderClients();
 	},
 
 	/* SVG helper: create element with attrs */
@@ -372,6 +396,80 @@ return view.extend({
 				}, n.client_count + ' CLI', grp);
 			}
 		});
+	},
+
+	/* ---- render client devices attached to APs ---- */
+	renderClients: function() {
+		var self = this;
+		var g = this.svgGroup.querySelector('.client-layer');
+		if (!g) return;
+		while (g.firstChild) g.removeChild(g.firstChild);
+		if (!this.lastClients || !this.lastNodes) return;
+
+		/* M16 get_clients reports the controller's local AP only:
+		 * all clients fan out below the controller card for now */
+		var ctrl = null;
+		this.lastNodes.forEach(function(n) { if (n.role === 'controller') ctrl = n; });
+
+		var clients = this.lastClients.clients || [];
+		clients.slice(0, CLIENT_MAX_SHOW).forEach(function(c, idx) {
+			/* client attaches to controller by default (local AP clients) */
+			var ap = ctrl;
+			var apPos = ap ? self.nodePos[ap.id] : null;
+			if (!apPos) return;
+			var total = Math.min(clients.length, CLIENT_MAX_SHOW);
+			var pos = self.clientPos(apPos, idx, total);
+			var col = self.clientColor(c.rssi);
+			var sel = self.selectedClient === c.mac;
+
+			/* thin line from AP to client */
+			self._svg('line', {
+				x1: apPos.x, y1: apPos.y + NODE_H/2,
+				x2: pos.x, y2: pos.y,
+				stroke: '#E0E0E0', 'stroke-width': 1.5,
+				opacity: 0.6
+			}, g);
+
+			/* client circle */
+			var grp = self._svg('g', {
+				'class': 'topo-client', 'data-id': c.mac,
+				'transform': 'translate(' + pos.x + ',' + pos.y + ')'
+			}, g);
+			grp.style.cursor = 'pointer';
+			grp.style.touchAction = 'none';
+
+			/* outer ring (selection highlight) */
+			if (sel) self._svg('circle', { cx: 0, cy: 0, r: CLIENT_R + 3,
+				fill: 'none', stroke: '#FF9800', 'stroke-width': 2 }, grp);
+
+			/* device body */
+			self._svg('circle', {
+				cx: 0, cy: 0, r: CLIENT_R,
+				fill: '#FFFFFF', stroke: col, 'stroke-width': 2.5
+			}, grp);
+
+			/* RSSI dot inside */
+			self._svg('circle', { cx: 0, cy: -4, r: 4, fill: col }, grp);
+
+			/* short MAC label */
+			var mac = c.mac || '';
+			var shortM = mac.length > 11 ? mac.substring(0, 8) + '…' : mac;
+			self._text({
+				x: 0, y: CLIENT_R + 12, 'font-size': 9, fill: '#999',
+				'text-anchor': 'middle'
+			}, shortM, grp);
+		});
+
+		/* overflow indicator */
+		if (clients.length > CLIENT_MAX_SHOW) {
+			var apPos = ctrl ? self.nodePos[ctrl.id] : null;
+			if (apPos) {
+				self._text({
+					x: apPos.x, y: apPos.y + NODE_H/2 + CLIENT_FAN_R + 25,
+					'font-size': 10, fill: '#999', 'text-anchor': 'middle'
+				}, '+' + (clients.length - CLIENT_MAX_SHOW) + ' ' + _('more clients'), g);
+			}
+		}
 	},
 
 	/* Group links by node pair, render with perpendicular offsets */
@@ -489,6 +587,24 @@ return view.extend({
 				this._row(el, _('Last Seen'), fmtAgo(n.last_seen));
 				this._row(el, _('Clients'), String(n.client_count || 0));
 			}
+		} else if (this.selectedClient && this.lastClients) {
+			var cs = this.lastClients.clients || [];
+			var c = null;
+			for (var ci = 0; ci < cs.length; ci++)
+				if (cs[ci].mac === this.selectedClient) { c = cs[ci]; break; }
+			if (c) {
+				title.textContent = c.mac || _('Client');
+				el.appendChild(title);
+				this._section(el, _('Device'));
+				this._row(el, _('MAC'), c.mac || '-');
+				this._row(el, _('SSID'), c.ssid || '-');
+				this._row(el, _('Interface'), c.ifname || '-');
+				this._section(el, _('Quality'));
+				this._row(el, _('RSSI'), c.rssi ? c.rssi + ' dBm' : '-',
+					this.clientColor(c.rssi));
+				if (c.rx_kbps) this._row(el, _('RX Rate'), Math.round(c.rx_kbps / 1000) + ' Mbps');
+				if (c.tx_kbps) this._row(el, _('TX Rate'), Math.round(c.tx_kbps / 1000) + ' Mbps');
+			}
 		} else if (this.selectedLink && this.lastLinks) {
 			var l = null;
 			for (var j = 0; j < this.lastLinks.length; j++)
@@ -515,7 +631,7 @@ return view.extend({
 		} else {
 			var hint = document.createElement('div');
 			hint.style.cssText = 'color:#999;font-size:small;padding:20px 0;text-align:center';
-			hint.textContent = _('Tap a node or link to view details');
+			hint.textContent = _('Tap a node, link or client to view details');
 			el.appendChild(hint);
 		}
 	},
@@ -570,6 +686,12 @@ return view.extend({
 			self.lastLinks = data.links || [];
 			self.lastData = data;
 
+			/* fetch client devices in parallel */
+			L.resolveDefault(callClients(), { clients: [] }).then(function(cd) {
+				self.lastClients = cd || { clients: [] };
+				self.renderClients();
+			});
+
 			if (!self._layoutScope)
 				for (var i = 0; i < data.nodes.length; i++)
 					if (data.nodes[i].role === 'controller') {
@@ -599,6 +721,7 @@ return view.extend({
 		svg.addEventListener('pointerdown', function(evt) {
 			var nodeEl = evt.target.closest ? evt.target.closest('.topo-node') : null;
 			var linkEl = evt.target.closest ? evt.target.closest('.topo-link') : null;
+			var clientEl = evt.target.closest ? evt.target.closest('.topo-client') : null;
 
 			if (nodeEl) {
 				self._pointers[evt.pointerId] = { type: 'node' };
@@ -608,15 +731,24 @@ return view.extend({
 				if (p) self.dragStart = { ox: pt.x - p.x, oy: pt.y - p.y };
 				self.selectedNode = self.dragTarget;
 				self.selectedLink = null;
+				self.selectedClient = null;
+				self.renderDetail(); self.renderAll();
+			} else if (clientEl) {
+				self._pointers[evt.pointerId] = { type: 'client' };
+				self.selectedClient = clientEl.getAttribute('data-id');
+				self.selectedNode = null;
+				self.selectedLink = null;
 				self.renderDetail(); self.renderAll();
 			} else if (linkEl) {
 				self._pointers[evt.pointerId] = { type: 'link' };
 				self.selectedLink = linkEl.getAttribute('data-id');
 				self.selectedNode = null;
+				self.selectedClient = null;
 				self.renderDetail(); self.renderAll();
 			} else {
 				self._pointers[evt.pointerId] = { type: 'pan' };
 				self.dragStart = { x: evt.clientX, y: evt.clientY, px: self.pan.x, py: self.pan.y };
+				self.selectedClient = null;
 			}
 			try { svg.setPointerCapture(evt.pointerId); } catch (e) {}
 			evt.preventDefault();
@@ -636,6 +768,7 @@ return view.extend({
 					var el = self.svgGroup.querySelector('.topo-node' + sel);
 					if (el) el.setAttribute('transform', 'translate(' + p.x + ',' + p.y + ')');
 					self.renderLinks();
+					self.renderClients();
 				}
 			} else if (ptr.type === 'pan') {
 				self.pan.x = self.dragStart.px + (evt.clientX - self.dragStart.x);
@@ -675,6 +808,7 @@ return view.extend({
 		window.addEventListener('keydown', function(evt) {
 			if (evt.key === 'Escape') {
 				self.selectedNode = null; self.selectedLink = null;
+				self.selectedClient = null;
 				self.renderDetail(); self.renderAll();
 			}
 		});
@@ -747,8 +881,11 @@ return view.extend({
 		linkLayer.setAttribute('class', 'link-layer');
 		var nodeLayer = document.createElementNS(NS, 'g');
 		nodeLayer.setAttribute('class', 'node-layer');
+		var clientLayer = document.createElementNS(NS, 'g');
+		clientLayer.setAttribute('class', 'client-layer');
 		viewport.appendChild(linkLayer);
 		viewport.appendChild(nodeLayer);
+		viewport.appendChild(clientLayer);
 		svg.appendChild(viewport);
 
 		var canvasWrap = E('div', {
@@ -787,6 +924,11 @@ return view.extend({
 				self.applyTransform();
 				self.renderAll();
 			}
+			/* fetch clients for initial render */
+			L.resolveDefault(callClients(), { clients: [] }).then(function(cd) {
+				self.lastClients = cd || { clients: [] };
+				self.renderClients();
+			});
 			self.renderDetail();
 			self.renderStatus(data);
 			poll.add(L.bind(self.refresh, self), POLL_INTERVAL);

@@ -309,3 +309,15 @@ msgstr "连接"
 
 msgid "Quality"
 msgstr "质量"
+
+msgid "Tap a node, link or client to view details"
+msgstr "点击节点、链路或客户端查看详情"
+
+msgid "MAC"
+msgstr "MAC"
+
+msgid "RX Rate"
+msgstr "接收速率"
+
+msgid "more clients"
+msgstr "更多客户端"

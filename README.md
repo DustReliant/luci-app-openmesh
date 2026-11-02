@@ -21,6 +21,7 @@
 - ✅ 双链路曲线分离（802.11s 虚线 / BATMAN 点线，贝塞尔曲线+标签底板）
 - ✅ BFS 智能布局（星形/链式/树形/环形/孤立节点自适应）
 - ✅ 节点/链路点击详情面板（分组展示）
+- ✅ 客户端设备上画布（控制器 AP 客户端扇形排布，RSSI 三档着色，点击详情，>8 个溢出摘要）
 - ✅ 布局持久化（localStorage，按控制器 node_id 网络隔离）
 - ✅ 5 秒实时刷新（新节点自动加入，已有节点位置不变）
 - ✅ 采集健康指示（ok/stale/failed，与节点在线状态解耦）
@@ -121,6 +122,7 @@ tests/                   # 自动化测试
 # 前端测试（Node.js）
 node tests/test_topology_frontend.js   # 布局持久化+安全 23 项
 node tests/test_phase62.js             # 智能布局+双链路 22 项
+node tests/test_topology_clients.js    # 客户端画布渲染 13 项
 
 # 命令层测试（假 batctl）
 ./tests/test_batman_cmdlayer.sh
