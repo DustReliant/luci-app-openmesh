@@ -330,3 +330,78 @@ msgstr "不使用有线"
 
 msgid "All LAN ports"
 msgstr "全部 LAN 口"
+
+msgid "Node online"
+msgstr "节点上线"
+
+msgid "Node offline"
+msgstr "节点离线"
+
+msgid "Link up"
+msgstr "链路建立"
+
+msgid "Link down"
+msgstr "链路断开"
+
+msgid "Data collection failed"
+msgstr "数据采集失败"
+
+msgid "Data collection recovered"
+msgstr "数据采集恢复"
+
+msgid "RPC failed, showing cached data"
+msgstr "连接失败，显示缓存数据"
+
+msgid "Weak signal"
+msgstr "信号弱"
+
+msgid "Signal recovered"
+msgstr "信号恢复"
+
+msgid "s ago"
+msgstr "秒前"
+
+msgid "min ago"
+msgstr "分钟前"
+
+msgid "h ago"
+msgstr "小时前"
+
+msgid "Unknown"
+msgstr "未知"
+
+msgid "Stale"
+msgstr "过期"
+
+msgid "Data OK"
+msgstr "数据正常"
+
+msgid "Data may be stale"
+msgstr "数据可能过期"
+
+msgid "Collect failed, showing cached topology"
+msgstr "采集失败，显示缓存拓扑"
+
+msgid "Selected object no longer in topology"
+msgstr "所选对象已不在当前拓扑中"
+
+msgid "Data Age"
+msgstr "数据时间"
+
+msgid "Link State"
+msgstr "链路状态"
+
+msgid "No data"
+msgstr "暂无数据"
+
+msgid "Active"
+msgstr "活跃"
+
+msgid "Realtime"
+msgstr "实时"
+
+msgid "Ethernet"
+msgstr "Ethernet"
+
+msgid "Short-term sampling (~3 min), not long-term history"
+msgstr "短时采样（约 3 分钟），非长期历史"

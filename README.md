@@ -23,6 +23,11 @@
 - ✅ BFS 智能布局（星形/链式/树形/环形/孤立节点自适应）
 - ✅ 节点/链路点击详情面板（分组展示）
 - ✅ 客户端设备上画布（控制器 AP 客户端扇形排布，RSSI 三档着色，点击详情，>8 个溢出摘要）
+- ✅ 节点四态模型（在线绿/离线灰/degraded 橙需连续证据/未知灰问号，离线保留最后已知信息+数据龄）
+- ✅ 链路质量分级（802.11s 按 RSSI、BATMAN 按 TQ 各自标尺；缺失=--，不伪造）
+- ✅ 采集健康解耦（stale/failed/RPC 失败仅横幅提示+缓存拓扑，不误判离线）
+- ✅ 状态迁移事件日志（上下线/链路建立断开/采集故障恢复，只报真实变化）
+- ✅ 链路短时趋势（≈3 分钟有界采样，缺口断线呈现，非长期历史）
 - ✅ 布局持久化（localStorage，按控制器 node_id 网络隔离）
 - ✅ 5 秒实时刷新（新节点自动加入，已有节点位置不变）
 - ✅ 采集健康指示（ok/stale/failed，与节点在线状态解耦）
@@ -125,6 +130,7 @@ tests/                   # 自动化测试
 node tests/test_topology_frontend.js   # 布局持久化+安全 23 项
 node tests/test_phase62.js             # 智能布局+双链路 22 项
 node tests/test_topology_clients.js    # 客户端画布渲染 13 项
+node tests/test_phase63_status.js      # 拓扑状态模型+质量分级+事件 25 项
 node tests/test_wizard_lanports.js     # 向导 LAN 口下拉 9 项
 
 # 命令层测试（假 batctl / 假 uci）
@@ -174,5 +180,6 @@ GPL-3.0-or-later（依赖 libsodium 为 ISC、libubox/libubus 为 LGPL-2.1）
 | [v0.2-plan.md](docs/design/v0.2-plan.md) | V0.2 里程碑 + 真机验证记录 |
 | [m18-topology-model.md](docs/design/m18-topology-model.md) | 统一拓扑模型设计 |
 | [m19-wired-lan-select.md](docs/design/m19-wired-lan-select.md) | 有线回程 LAN 口选择（Phase 6.3 + 自动识别路线） |
+| [m20-topology-status.md](docs/design/m20-topology-status.md) | 拓扑状态可视化与交互完善（四态/质量分级/采集解耦/事件/短时趋势） |
 | [scripts/openwrt-patches/](scripts/openwrt-patches/) | rtl8188ee 驱动补丁 + 自编译指南 |
 | [ADR 列表](docs/decisions/) | 架构决策记录（8 篇） |
