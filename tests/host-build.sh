@@ -97,6 +97,13 @@ cc $CFLAGS_extra -I"$SRC" -I"$BUILD" -Wall -Wextra -std=c11 \
 	"$REPO/tests/test_lanports.c" "$SRC/lanports.c"
 "$BUILD/test_lanports"
 
+# m21 port discovery classifier (pure)
+# shellcheck disable=SC2086
+cc $CFLAGS_extra -I"$SRC" -I"$BUILD" -Wall -Wextra -std=c11 \
+	-o "$BUILD/test_ports_classify" \
+	"$REPO/tests/test_ports_classify.c" "$SRC/ports_classify.c"
+"$BUILD/test_ports_classify"
+
 # m19 hybrid wired-leg orchestration (fake uci runs the real script)
 "$REPO/tests/test_hybrid_lanports.sh"
 

@@ -405,3 +405,123 @@ msgstr "Ethernet"
 
 msgid "Short-term sampling (~3 min), not long-term history"
 msgstr "短时采样（约 3 分钟），非长期历史"
+
+msgid "Wired mesh backhaul (preview)"
+msgstr "有线 Mesh 回程（预览）"
+
+msgid "Enable wired mesh backhaul"
+msgstr "启用有线 Mesh 回程"
+
+msgid "Backhaul mode (intent)"
+msgstr "回程模式（意图）"
+
+msgid "Wireless only"
+msgstr "仅无线"
+
+msgid "Wired only"
+msgstr "仅有线"
+
+msgid "Wired preferred, wireless backup"
+msgstr "有线优先，无线备用"
+
+msgid "Physical port"
+msgstr "物理网口"
+
+msgid "Refresh ports"
+msgstr "刷新网口"
+
+msgid "Current port info"
+msgstr "当前端口信息"
+
+msgid "Carrier"
+msgstr "Carrier"
+
+msgid "Speed"
+msgstr "速率"
+
+msgid "Bridge"
+msgstr "Bridge"
+
+msgid "Used for mesh"
+msgstr "已用于 Mesh"
+
+msgid "Management path"
+msgstr "管理路径"
+
+msgid "Eligible"
+msgstr "可配置"
+
+msgid "Reason"
+msgstr "原因"
+
+msgid "Preview (read-only, nothing is executed)"
+msgstr "配置预览（只读，不执行任何操作）"
+
+msgid "Configurable"
+msgstr "可配置"
+
+msgid "Not configurable"
+msgstr "不可配置"
+
+msgid "UCI changes"
+msgstr "UCI 变更"
+
+msgid "System operations (7.2)"
+msgstr "系统操作（7.2 阶段）"
+
+msgid "Possible interruptions"
+msgstr "可能中断的服务"
+
+msgid "Management risk"
+msgstr "管理连接风险"
+
+msgid "Rollback strategy"
+msgstr "回滚策略"
+
+msgid "This phase only previews; no network configuration is changed."
+msgstr "本阶段仅预览，不会修改任何网络配置。"
+
+msgid "Select a port"
+msgstr "选择网口"
+
+msgid "Port query failed"
+msgstr "网口查询失败"
+
+msgid "Plan query failed"
+msgstr "预检查失败"
+
+msgid "Yes"
+msgstr "是"
+
+msgid "No"
+msgstr "否"
+
+msgid "Management path (live)"
+msgstr "管理路径（当前在线）"
+
+msgid "Cannot exclude management path"
+msgstr "无法排除管理路径"
+
+msgid "WAN in use"
+msgstr "WAN 占用"
+
+msgid "VLAN dependency"
+msgstr "VLAN 依赖"
+
+msgid "Already used for mesh"
+msgstr "已用于 Mesh 回程"
+
+msgid "Switch CPU port"
+msgstr "交换机 CPU 口"
+
+msgid "Virtual device"
+msgstr "虚拟设备"
+
+msgid "Wireless device"
+msgstr "无线设备"
+
+msgid "Enslaved"
+msgstr "已被占用"
+
+msgid "Unused port"
+msgstr "未使用端口"

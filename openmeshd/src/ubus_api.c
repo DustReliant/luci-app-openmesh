@@ -22,6 +22,7 @@
 #include "monitor.h"
 #include "topology.h"
 #include "lanports.h"
+#include "ports.h"
 
 
 static struct blob_buf b;
@@ -44,6 +45,11 @@ static const struct blobmsg_policy om_roam_policy[4] = {
 	{ "v", BLOBMSG_TYPE_INT8 },
 	{ "r", BLOBMSG_TYPE_INT8 },
 	{ "domain", BLOBMSG_TYPE_STRING },
+};
+
+static const struct blobmsg_policy om_portplan_policy[2] = {
+	{ "device", BLOBMSG_TYPE_STRING },
+	{ "mode", BLOBMSG_TYPE_STRING },
 };
 
 static void node_to_blob(const struct om_node_info *n)
@@ -636,6 +642,123 @@ static int om_get_lan_ports(struct ubus_context *ctx, struct ubus_object *obj,
 	return ubus_send_reply(ctx, req, b.head);
 }
 
+/* ==================== m21: port discovery + plan (read-only) ============ */
+
+static const char *port_net_type(const struct om_port_facts *f)
+{
+	if (f->wireless) return "wireless";
+	if (f->is_bridge) return "bridge";
+	if (f->is_batman_soft) return "batman";
+	if (f->is_vlan_subif) return "vlan";
+	return "ethernet";
+}
+
+static void port_entry_blob(const struct om_port_entry *pe)
+{
+	void *t = blobmsg_open_table(&b, NULL);
+
+	blobmsg_add_string(&b, "device", pe->f.device);
+	blobmsg_add_string(&b, "label", pe->f.device);	/* board labels TBD */
+	blobmsg_add_string(&b, "type", port_net_type(&pe->f));
+	blobmsg_add_u8(&b, "carrier", pe->f.carrier);
+	if (pe->f.speed > 0)
+		blobmsg_add_u32(&b, "speed_mbps", (uint32_t)pe->f.speed);
+	blobmsg_add_string(&b, "bridge",
+			   pe->f.in_lan_bridge ? "br-lan" : "");
+	blobmsg_add_string(&b, "role", pe->v.role);
+	blobmsg_add_string(&b, "management",
+			   om_port_mgmt_str(pe->v.mgmt));
+	blobmsg_add_u8(&b, "eligible", pe->v.eligible);
+	if (pe->v.reason[0])
+		blobmsg_add_string(&b, "reason", pe->v.reason);
+	blobmsg_close_table(&b, t);
+}
+
+static int om_ports(struct ubus_context *ctx, struct ubus_object *obj,
+		    struct ubus_request_data *req, const char *method,
+		    struct blob_attr *msg)
+{
+	struct om_port_entry pe[OM_PORTS_MAX];
+	void *a;
+	int n, i;
+
+	(void)obj;
+	(void)method;
+	(void)msg;
+	n = om_ports_discover(pe, OM_PORTS_MAX);
+	if (n < 0)
+		return UBUS_STATUS_UNKNOWN_ERROR;
+	blob_buf_init(&b, 0);
+	a = blobmsg_open_array(&b, "ports");
+	for (i = 0; i < n; i++)
+		port_entry_blob(&pe[i]);
+	blobmsg_close_array(&b, a);
+	return ubus_send_reply(ctx, req, b.head);
+}
+
+static int om_portplan(struct ubus_context *ctx, struct ubus_object *obj,
+		       struct ubus_request_data *req, const char *method,
+		       struct blob_attr *msg)
+{
+	struct blob_attr *tb[2] = { NULL, NULL };
+	struct om_port_plan plan;
+	const char *dev, *mode;
+	void *a, *c, *pv;
+	int i, rc;
+
+	(void)obj;
+	(void)method;
+	blobmsg_parse(om_portplan_policy, 2, tb, blob_data(msg), blob_len(msg));
+	dev = tb[0] ? blobmsg_get_string(tb[0]) : NULL;
+	mode = tb[1] ? blobmsg_get_string(tb[1]) : "wireless_only";
+	if (!dev || !*dev)
+		return UBUS_STATUS_INVALID_ARGUMENT;
+	/* backend revalidation is mandatory: a stale frontend list is
+	 * never trusted (task §五: 写操作必须重新验证) */
+	rc = om_port_plan(dev, mode, &plan);
+	if (rc < 0)
+		return UBUS_STATUS_INVALID_ARGUMENT;
+
+	blob_buf_init(&b, 0);
+	blobmsg_add_string(&b, "device", plan.entry.f.device);
+	blobmsg_add_string(&b, "mode", plan.mode);
+	blobmsg_add_u8(&b, "ok", plan.ok);
+	blobmsg_add_u8(&b, "preview_only", true);
+
+	a = blobmsg_open_table(&b, "port");
+	port_entry_blob(&plan.entry);
+	blobmsg_close_table(&b, a);
+
+	a = blobmsg_open_array(&b, "checks");
+	for (i = 0; i < plan.n_checks; i++) {
+		c = blobmsg_open_table(&b, NULL);
+		blobmsg_add_string(&b, "name", plan.checks[i].name);
+		blobmsg_add_string(&b, "state", plan.checks[i].state);
+		blobmsg_add_string(&b, "detail", plan.checks[i].detail);
+		blobmsg_close_table(&b, c);
+	}
+	blobmsg_close_array(&b, a);
+
+	pv = blobmsg_open_table(&b, "preview");
+	a = blobmsg_open_array(&b, "uci_changes");
+	for (i = 0; i < plan.n_uci; i++)
+		blobmsg_add_string(&b, NULL, plan.uci_changes[i]);
+	blobmsg_close_array(&b, a);
+	a = blobmsg_open_array(&b, "ops");
+	for (i = 0; i < plan.n_ops; i++)
+		blobmsg_add_string(&b, NULL, plan.ops[i]);
+	blobmsg_close_array(&b, a);
+	a = blobmsg_open_array(&b, "interruptions");
+	for (i = 0; i < plan.n_interruptions; i++)
+		blobmsg_add_string(&b, NULL, plan.interruptions[i]);
+	blobmsg_close_array(&b, a);
+	blobmsg_add_string(&b, "mgmt_risk", plan.mgmt_risk);
+	blobmsg_add_string(&b, "rollback", plan.rollback);
+	blobmsg_close_table(&b, pv);
+
+	return ubus_send_reply(ctx, req, b.head);
+}
+
 static int om_roaming_apply(struct ubus_context *ctx, struct ubus_object *obj,
 			    struct ubus_request_data *req, const char *method,
 			    struct blob_attr *msg)
@@ -689,6 +812,8 @@ static const struct ubus_method om_methods[] = {
 	UBUS_METHOD_NOARG("topology", om_topology),
 	UBUS_METHOD_NOARG("get_mesh_info", om_get_mesh_info),
 	UBUS_METHOD_NOARG("get_lan_ports", om_get_lan_ports),
+	UBUS_METHOD_NOARG("ports", om_ports),
+	UBUS_METHOD("port_plan", om_portplan, om_portplan_policy),
 	UBUS_METHOD("roaming_apply", om_roaming_apply, om_roam_policy),
 };
 

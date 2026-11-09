@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=openmeshd
 PKG_VERSION:=0.0.1
-PKG_RELEASE:=19
+PKG_RELEASE:=20
 PKG_LICENSE:=GPL-3.0-or-later
 PKG_MAINTAINER:=DustReliant <https://github.com/DustReliant>
 
@@ -52,6 +52,8 @@ define Build/Compile
 		$(PKG_BUILD_DIR)/batman_collect.c \
 		$(PKG_BUILD_DIR)/topology.c \
 		$(PKG_BUILD_DIR)/lanports.c \
+		$(PKG_BUILD_DIR)/ports.c \
+		$(PKG_BUILD_DIR)/ports_classify.c \
 		$(TARGET_LDFLAGS) -lubox -lubus -lblobmsg_json -lsodium -luci
 endef
 
