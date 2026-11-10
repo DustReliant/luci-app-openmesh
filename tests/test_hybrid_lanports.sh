@@ -46,11 +46,19 @@ network|lan|proto|static
 EOF
 	cat > "$T/fakebin/uci" <<'EOF'
 #!/bin/sh
-# fake uci: exactly the surface hybrid-netconf.sh uses. State file
-# $UCI_STATE, one record per line:
+# fake uci with two-phase staging (m22-2), matching the semantics the
+# transaction audit depends on:
+#   - mutations land in $UCI_STATE.stag only (first mutation copies the
+#     committed state); reads (get/show) see staged changes
+#   - commit merges staging into the committed file (atomic mv)
+#   - UCI_FAIL_ON=commit makes commit FAIL WITHOUT merging, leaving the
+#     deltas staged -- exactly the residue drop_uci_staging() discards
+# State file lines (one record per line):
 #   network|<section>|@type=<type>
 #   network|<section>|<option>|<value>[|<value>...]
 STATE="${UCI_STATE:?UCI_STATE not set}"
+CUR="$STATE"
+[ -f "$STATE.stag" ] && CUR="$STATE.stag"
 
 while [ "${1#-}" != "$1" ]; do shift; done
 cmd="$1"
@@ -68,6 +76,11 @@ case "$sec" in
 *=*) [ -z "$opt" ] && { val="${sec#*=}"; sec="${sec%%=*}"; } ;;
 esac
 
+stage() {
+	if [ ! -f "$STATE.stag" ]; then cp "$STATE" "$STATE.stag"; fi
+	CUR="$STATE.stag"
+}
+
 case "$cmd" in
 show)
 	awk -F'|' '
@@ -81,7 +94,7 @@ show)
 				line = line (i > 4 ? " " : "") q $i q
 			print line
 		}
-	}' "$STATE"
+	}' "$CUR"
 	;;
 get)
 	awk -F'|' -v sec="$sec" -v opt="$opt" '
@@ -93,23 +106,25 @@ get)
 		found = 1
 		exit
 	}
-	END { exit found ? 0 : 1 }' "$STATE"
+	END { exit found ? 0 : 1 }' "$CUR"
 	;;
 set)
+	stage
 	if [ -n "$opt" ]; then
 		awk -F'|' -v sec="$sec" -v opt="$opt" \
 			'!($1 == "network" && $2 == sec && $3 == opt)' \
-			"$STATE" > "$STATE.new"
-		printf '%s|%s|%s|%s\n' network "$sec" "$opt" "$val" >> "$STATE.new"
+			"$CUR" > "$CUR.new"
+		printf '%s|%s|%s|%s\n' network "$sec" "$opt" "$val" >> "$CUR.new"
 	else
 		awk -F'|' -v sec="$sec" \
 			'!($1 == "network" && $2 == sec)' \
-			"$STATE" > "$STATE.new"
-		printf '%s|%s|@type=%s\n' network "$sec" "$val" >> "$STATE.new"
+			"$CUR" > "$CUR.new"
+		printf '%s|%s|@type=%s\n' network "$sec" "$val" >> "$CUR.new"
 	fi
-	mv "$STATE.new" "$STATE"
+	mv "$CUR.new" "$CUR"
 	;;
 add_list)
+	stage
 	awk -F'|' -v sec="$sec" -v opt="$opt" -v val="$val" '
 	$1 == "network" && $2 == sec && $3 == opt {
 		print $0 "|" val
@@ -118,10 +133,11 @@ add_list)
 	}
 	{ print }
 	END { if (!added) print "network|" sec "|" opt "|" val }' \
-		"$STATE" > "$STATE.new"
-	mv "$STATE.new" "$STATE"
+		"$CUR" > "$CUR.new"
+	mv "$CUR.new" "$CUR"
 	;;
 del_list)
+	stage
 	awk -F'|' -v sec="$sec" -v opt="$opt" -v val="$val" '
 	$1 == "network" && $2 == sec && $3 == opt {
 		out = $1 "|" $2 "|" $3
@@ -134,22 +150,25 @@ del_list)
 		if (nv > 0) print out
 		next
 	}
-	{ print }' "$STATE" > "$STATE.new"
-	mv "$STATE.new" "$STATE"
+	{ print }' "$CUR" > "$CUR.new"
+	mv "$CUR.new" "$CUR"
 	;;
 delete)
+	stage
 	if [ -n "$opt" ]; then
 		awk -F'|' -v sec="$sec" -v opt="$opt" \
 			'!($1 == "network" && $2 == sec && $3 == opt)' \
-			"$STATE" > "$STATE.new"
+			"$CUR" > "$CUR.new"
 	else
 		awk -F'|' -v sec="$sec" \
 			'!($1 == "network" && $2 == sec)' \
-			"$STATE" > "$STATE.new"
+			"$CUR" > "$CUR.new"
 	fi
-	mv "$STATE.new" "$STATE"
+	mv "$CUR.new" "$CUR"
 	;;
 commit)
+	[ "$UCI_FAIL_ON" = "commit" ] && exit 1
+	if [ -f "$STATE.stag" ]; then mv "$STATE.stag" "$STATE"; fi
 	exit 0
 	;;
 *)
@@ -251,6 +270,89 @@ run "lan1" >/dev/null 2>&1
 if run ""; then ok "H9 rc"; else bad "H9 rc"; fi
 lacks '|om_eth_' && ok "H9 hardif removed" || bad "H9 hardif removed"
 ports_eq 'lan1|lan2|lan3|om_bat' && ok "H9 port back in bridge" || bad "H9 port back in bridge"
+
+# ---- TX: transaction-safety simulations (m22-2 audit fixes) ----
+
+run_env() {  # run_env <lan_ports> <uci_fail_on|-> : run with uci fault hook
+	(
+		PATH="$T/fakebin:$PATH"
+		UCI_STATE="$T/state"
+		OM_NET_SYS="$T/net"
+		export PATH UCI_STATE OM_NET_SYS
+		[ -n "${2:-}" ] && { UCI_FAIL_ON="$2"; export UCI_FAIL_ON; }
+		if [ -n "${1:-}" ]; then
+			OM_LAN_PORTS="$1"
+			export OM_LAN_PORTS
+		else
+			unset OM_LAN_PORTS
+		fi
+		sh "$SCRIPT"
+	)
+}
+
+echo "== TX1: commit failure mid-run leaves committed file untouched =="
+setup
+cp "$T/state" "$T/state.clean"
+if run_env "lan1" commit >/dev/null 2>&1; then bad "TX1 rc nonzero"; else ok "TX1 rc nonzero"; fi
+if cmp -s "$T/state" "$T/state.clean"; then ok "TX1 committed file untouched"; else bad "TX1 committed file untouched"; fi
+[ -f "$T/state.stag" ] && ok "TX1 residue staging exists" || bad "TX1 residue staging exists"
+
+echo "== TX2: dropping staging keeps the file clean (drop_uci_staging) =="
+rm -f "$T/state.stag"
+if run_env "" >/dev/null 2>&1; then ok "TX2 next apply succeeds"; else bad "TX2 next apply succeeds"; fi
+ports_eq 'lan1|lan2|lan3|om_bat' && ok "TX2 clean hybrid state" || bad "TX2 clean hybrid state"
+lacks 'network|om_eth_' && ok "TX2 no ghost hardif" || bad "TX2 no ghost hardif"
+
+echo "== TX3: rollback sequence -- restore snapshot, THEN purge =="
+setup
+cp "$T/state" "$T/state.snap"
+run "lan1" >/dev/null 2>&1
+ports_eq 'lan2|lan3|om_bat' && ok "TX3 wired leg applied" || bad "TX3 wired leg applied"
+# netconf rollback: file restore + staging drop ...
+cat "$T/state.snap" > "$T/state"
+rm -f "$T/state.stag"
+# ... then purge_om_sections() network half (netconf.c, keep in sync)
+(
+	PATH="$T/fakebin:$PATH" UCI_STATE="$T/state" OM_NET_SYS="$T/net"
+	export PATH UCI_STATE OM_NET_SYS
+	BR=$(uci -q show network 2>/dev/null |
+		sed -n "s/^network\.\([^.]*\)\.name='br-lan'/\1/p")
+	[ -n "$BR" ] && uci -q del_list network.$BR.ports='om_bat'
+	uci -q delete network.om_bat
+	uci -q delete network.om_mesh
+	for S in $(uci -q show network 2>/dev/null |
+		sed -n "s/^network\.\(om_eth_[A-Za-z0-9_]*\)=interface$/\1/p"); do
+		DEV=$(uci -q get network.$S.device 2>/dev/null)
+		[ -n "$DEV" ] && [ -n "$BR" ] &&
+			uci -q del_list network.$BR.ports="$DEV"
+		uci -q delete network.$S
+	done
+	uci -q commit network
+)
+ports_eq 'lan1|lan2|lan3' && ok "TX3 ports fully restored+purged" || bad "TX3 ports fully restored+purged"
+lacks 'network|om_eth_' && ok "TX3 om_eth gone" || bad "TX3 om_eth gone"
+lacks 'network|om_bat|' && ok "TX3 om_bat gone" || bad "TX3 om_bat gone"
+
+echo "== TX4: rollback == byte-identical snapshot restore =="
+setup
+cp "$T/state" "$T/state.snap"
+run "lan1" >/dev/null 2>&1
+if cmp -s "$T/state" "$T/state.snap"; then bad "TX4 apply changed state"; else ok "TX4 apply changed state"; fi
+# netconf rollback: restore snapshot + drop staging
+cat "$T/state.snap" > "$T/state"
+rm -f "$T/state.stag"
+if cmp -s "$T/state" "$T/state.snap"; then ok "TX4 restore byte-identical"; else bad "TX4 restore byte-identical"; fi
+
+echo "== TX5: source-level guarantees (audit fixes present) =="
+SRC="$REPO/openmeshd/src/netconf.c"
+grep -q "has_gen && gen != nc->generation" "$SRC" &&
+	ok "TX5 confirm/rollback gen-gated" || bad "TX5 confirm/rollback gen-gated"
+grep -q "drop_uci_staging" "$SRC" &&
+	ok "TX5 staging drop wired" || bad "TX5 staging drop wired"
+grep -q "om_store_sync_backhaul_ports" "$SRC" &&
+	ok "TX5 backhaul sync wired" || bad "TX5 backhaul sync wired"
+grep -q "om_netconf_recover" "$SRC" &&
+	ok "TX5 boot recovery present" || bad "TX5 boot recovery present"
 
 echo
 echo "test_hybrid_lanports: $pass PASS, $fail FAIL"

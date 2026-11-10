@@ -57,6 +57,11 @@ static const struct blobmsg_policy om_portapply_policy[2] = {
 	{ "ack_unknown", BLOBMSG_TYPE_INT8 },
 };
 
+/* m22-2: optional transaction identity for confirm/rollback */
+static const struct blobmsg_policy om_txn_policy[1] = {
+	{ "gen", BLOBMSG_TYPE_INT32 },
+};
+
 static void node_to_blob(const struct om_node_info *n)
 {
 	char hex[OM_ID_HEX_LEN];
@@ -325,6 +330,7 @@ static int om_mesh_create(struct ubus_context *ctx, struct ubus_object *obj,
 	blobmsg_add_string(&b, "result", "applied");
 	blobmsg_add_string(&b, "key", key);
 	blobmsg_add_u32(&b, "confirm_window", 30);
+	blobmsg_add_u32(&b, "generation", u->netconf->generation);
 	return ubus_send_reply(ctx, req, b.head);
 }
 
@@ -358,13 +364,22 @@ static int om_apply_confirm(struct ubus_context *ctx, struct ubus_object *obj,
 			    struct blob_attr *msg)
 {
 	struct om_ubus *u = OM_HANDLER_CTX(obj);
+	struct blob_attr *tb[1] = { NULL };
+	bool has_gen = false;
+	uint32_t gen = 0;
 
 	(void)method;
-	(void)msg;
-	if (!u->netconf || om_netconf_confirm(u->netconf) < 0)
+	blobmsg_parse(om_txn_policy, 1, tb, blob_data(msg), blob_len(msg));
+	if (tb[0]) {
+		has_gen = true;
+		gen = blobmsg_get_u32(tb[0]);
+	}
+	if (!u->netconf ||
+	    om_netconf_confirm(u->netconf, gen, has_gen) < 0)
 		return UBUS_STATUS_NOT_FOUND;
 	blob_buf_init(&b, 0);
 	blobmsg_add_string(&b, "result", "confirmed");
+	blobmsg_add_u32(&b, "generation", u->netconf->generation);
 	return ubus_send_reply(ctx, req, b.head);
 }
 
@@ -373,13 +388,22 @@ static int om_apply_rollback(struct ubus_context *ctx, struct ubus_object *obj,
 			     const char *method, struct blob_attr *msg)
 {
 	struct om_ubus *u = OM_HANDLER_CTX(obj);
+	struct blob_attr *tb[1] = { NULL };
+	bool has_gen = false;
+	uint32_t gen = 0;
 
 	(void)method;
-	(void)msg;
-	if (!u->netconf || om_netconf_rollback(u->netconf) < 0)
+	blobmsg_parse(om_txn_policy, 1, tb, blob_data(msg), blob_len(msg));
+	if (tb[0]) {
+		has_gen = true;
+		gen = blobmsg_get_u32(tb[0]);
+	}
+	if (!u->netconf ||
+	    om_netconf_rollback(u->netconf, gen, has_gen) < 0)
 		return UBUS_STATUS_NOT_FOUND;
 	blob_buf_init(&b, 0);
 	blobmsg_add_string(&b, "result", "rolled-back");
+	blobmsg_add_u32(&b, "generation", u->netconf->generation);
 	return ubus_send_reply(ctx, req, b.head);
 }
 
@@ -833,6 +857,7 @@ static int om_port_apply(struct ubus_context *ctx, struct ubus_object *obj,
 	blobmsg_add_string(&b, "result", "applied");
 	blobmsg_add_string(&b, "device", dev);
 	blobmsg_add_u32(&b, "confirm_window", OM_TXN_TIMEOUT);
+	blobmsg_add_u32(&b, "generation", u->netconf->generation);
 	return ubus_send_reply(ctx, req, b.head);
 }
 
@@ -869,6 +894,7 @@ static int om_roaming_apply(struct ubus_context *ctx, struct ubus_object *obj,
 	blobmsg_add_string(&b, "result", "applied");
 	blobmsg_add_string(&b, "mobility_domain", domain);
 	blobmsg_add_u32(&b, "confirm_window", 30);
+	blobmsg_add_u32(&b, "generation", u->netconf->generation);
 	return ubus_send_reply(ctx, req, b.head);
 }
 
@@ -882,8 +908,8 @@ static const struct ubus_method om_methods[] = {
 	UBUS_METHOD("revoke", om_revoke, om_adopt_policy),
 	UBUS_METHOD("mesh_create", om_mesh_create, om_mesh_policy),
 	UBUS_METHOD_NOARG("mesh_join", om_mesh_join),
-	UBUS_METHOD_NOARG("apply_confirm", om_apply_confirm),
-	UBUS_METHOD_NOARG("apply_rollback", om_apply_rollback),
+	UBUS_METHOD("apply_confirm", om_apply_confirm, om_txn_policy),
+	UBUS_METHOD("apply_rollback", om_apply_rollback, om_txn_policy),
 	UBUS_METHOD_NOARG("get_links", om_get_links),
 	UBUS_METHOD_NOARG("get_clients", om_get_clients),
 	UBUS_METHOD_NOARG("topology", om_topology),

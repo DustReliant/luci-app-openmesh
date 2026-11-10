@@ -383,8 +383,7 @@ void om_store_backhaul_mode(char *mode, size_t mode_sz)
 	if (uci_load(c, "network", &p) == UCI_OK) {
 		uci_foreach_element(&p->sections, e) {
 			struct uci_section *t = uci_to_section(e);
-			struct uci_option *o = uci_lookup_option(c, t,
-								 "proto");
+			struct uci_option *o = uci_lookup_option(c, t, "proto");
 
 			if (o && o->type == UCI_TYPE_STRING &&
 			    !strcmp(o->v.string, "batadv")) {
@@ -392,6 +391,66 @@ void om_store_backhaul_mode(char *mode, size_t mode_sz)
 				break;
 			}
 		}
+	}
+	uci_free_context(c);
+}
+
+void om_store_sync_backhaul_ports(void)
+{
+	struct uci_context *c = uci_alloc_context();
+	struct uci_package *pn = NULL, *po = NULL;
+	struct uci_section *s = NULL;
+	struct uci_element *e;
+	struct uci_ptr ptr;
+	char spec[OM_PORTS_SPEC_MAX + 1] = "";
+	size_t len = 0;
+
+	if (!c)
+		return;
+	/* collect surviving om_eth hardif devices */
+	if (uci_load(c, "network", &pn) == UCI_OK) {
+		uci_foreach_element(&pn->sections, e) {
+			struct uci_section *t = uci_to_section(e);
+			struct uci_option *o;
+			size_t dl;
+
+			if (!t->e.name ||
+			    strncmp(t->e.name, "om_eth_", 7))
+				continue;
+			o = uci_lookup_option(c, t, "device");
+			if (!o || o->type != UCI_TYPE_STRING || !o->v.string)
+				continue;
+			dl = strlen(o->v.string);
+			if (!om_port_name_valid(o->v.string, dl))
+				continue;
+			if (len && len + 1 + dl < sizeof(spec))
+				spec[len++] = ',';
+			if (len + dl < sizeof(spec)) {
+				memcpy(spec + len, o->v.string, dl);
+				len += dl;
+			}
+		}
+	}
+	/* update only when a backhaul section exists */
+	if (uci_load(c, OM_UCI_PKG, &po) == UCI_OK) {
+		uci_foreach_element(&po->sections, e) {
+			if (!strcmp(uci_to_section(e)->type, "backhaul")) {
+				s = uci_to_section(e);
+				break;
+			}
+		}
+	}
+	if (s) {
+		memset(&ptr, 0, sizeof(ptr));
+		ptr.package = OM_UCI_PKG;
+		ptr.p = po;
+		ptr.s = s;
+		ptr.section = s->e.name;
+		ptr.option = "lan_ports";
+		ptr.value = spec;
+		uci_set(c, &ptr);
+		uci_save(c, po);
+		uci_commit(c, &po, false);
 	}
 	uci_free_context(c);
 }

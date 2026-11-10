@@ -41,6 +41,13 @@ int om_store_backhaul_get(char *mesh_id, size_t id_sz, char *mesh_key,
 /* Backhaul mode: "hybrid" if network has a batadv proto iface, else "wifi". */
 void om_store_backhaul_mode(char *mode, size_t mode_sz);
 
+/*
+ * m22-2: after a rollback/recovery, re-align the persisted wired-leg
+ * selection (backhaul.lan_ports) with the om_eth hardifs that actually
+ * survived in the network config. No-op without a backhaul section.
+ */
+void om_store_sync_backhaul_ports(void);
+
 /* Current br-lan bridge member ports (om_* virtual members excluded),
  * read from the network device section named br-lan. Fills out (each
  * OM_PORT_LEN bytes), returns the number of entries found (may exceed

@@ -30,6 +30,7 @@
 - ✅ 链路短时趋势（≈3 分钟有界采样，缺口断线呈现，非长期历史）
 - ✅ 物理网口发现与有线回程预览（Phase 7.1：ubus ports/port_plan 只读发现+预检+配置预览，管理路径/WAN/DSA CPU 口/VLAN 风险识别，零网络改动）
 - ✅ 有线回程写路径（Phase 7.2：port_apply 服务端重验门禁+唯一可确认风险 mgmt_unknown+复用 30s 事务与代理推送）
+- ✅ 事务安全加固（Phase 7.2 二片：确认/回滚绑定事务 generation；apply 失败即恢复快照；uci staging 残留清理；purge 清 bridge ports；回滚后 backhaul 意图自动同步）
 - ✅ 布局持久化（localStorage，按控制器 node_id 网络隔离）
 - ✅ 5 秒实时刷新（新节点自动加入，已有节点位置不变）
 - ✅ 采集健康指示（ok/stale/failed，与节点在线状态解耦）
@@ -133,7 +134,7 @@ node tests/test_topology_frontend.js   # 布局持久化+安全 23 项
 node tests/test_phase62.js             # 智能布局+双链路 22 项
 node tests/test_topology_clients.js    # 客户端画布渲染 13 项
 node tests/test_phase63_status.js      # 拓扑状态模型+质量分级+事件 25 项
-node tests/test_ports_ui.js            # 网口下拉/预检/应用门控前端 20 项
+node tests/test_ports_ui.js            # 网口下拉/预检/应用门控/gen 绑定 22 项
 node tests/test_wizard_lanports.js     # 向导 LAN 口下拉 9 项
 
 # 命令层测试（假 batctl / 假 uci）

@@ -60,11 +60,20 @@ int om_netconf_mesh_apply(struct om_netconf *nc, const char *state_dir,
 int om_netconf_roaming_apply(struct om_netconf *nc, const char *state_dir,
 			     bool k, bool v, bool r, const char *domain);
 
-/* Keep the just-applied configuration. Returns 0 / -1. */
-int om_netconf_confirm(struct om_netconf *nc);
+/*
+ * Keep the just-applied configuration. gen binding (m22-2): when
+ * has_gen is true the call confirms ONLY that transaction generation
+ * -- a confirm aimed at an already-expired transaction must never
+ * bless whatever new transaction happens to be active now.
+ * Returns 0 / -1.
+ */
+int om_netconf_confirm(struct om_netconf *nc, uint32_t gen, bool has_gen);
 
-/* Restore the snapshot immediately (also used by the deadline timer). */
-int om_netconf_rollback(struct om_netconf *nc);
+/*
+ * Restore the snapshot immediately (also used by the deadline timer).
+ * Same gen binding as om_netconf_confirm(). Returns 0 / -1.
+ */
+int om_netconf_rollback(struct om_netconf *nc, uint32_t gen, bool has_gen);
 
 /*
  * Boot-time recovery: if a previous transaction never got confirmed

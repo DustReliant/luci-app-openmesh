@@ -483,10 +483,11 @@ static void agent_rx_cb(struct uloop_fd *fd, unsigned int events)
 		p->last_rx = time(NULL);
 
 		/* agent: received traffic proves the mesh config did not
-		 * cut the controller link -> confirm pending txn */
+		 * cut the controller link -> confirm pending txn (its own
+		 * current transaction; the agent never confirms by proxy) */
 		if (agent_netconf && agent_netconf->active &&
 		    p->state == PS_ESTABLISHED)
-			om_netconf_confirm(agent_netconf);
+			om_netconf_confirm(agent_netconf, 0, false);
 
 		if (p->state == PS_HELLO && t == OM_SES_GRANT) {
 			char path[OM_PATH_MAX];

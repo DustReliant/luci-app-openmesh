@@ -255,6 +255,38 @@ test('P20: apply result vocabulary handled', function() {
 		code.includes('askRisk()'), 'need_ack re-prompts');
 });
 
+/* ---- m22-2: confirm/rollback are generation-bound ---- */
+
+test('P21: confirm/rollback carry the transaction generation', function() {
+	/* both entry points record the generation from their replies and
+	 * send it back -- a stale page cannot bless a newer transaction */
+	assert.ok(code.includes('params: [ \'gen\' ]'), 'rpc params declare gen');
+	assert.ok((code.match(/txnGen/g) || []).length >= 5,
+		'txnGen tracked and reused');
+	assert.ok(/callConfirm\(txnGen\)/.test(code), 'confirm sends gen');
+	assert.ok(/callRollback\(txnGen\)/.test(code), 'rollback sends gen');
+	/* generation captured from every apply-style reply */
+	assert.ok(/setCountdown[\s\S]{0,400}reply\.generation/.test(code),
+		'mesh_create reply generation captured');
+	assert.ok(/rv\.result === 'applied'[\s\S]{0,200}rv\.generation/.test(code),
+		'port_apply reply generation captured');
+});
+
+test('P22: backend rejects mismatched generation (source contract)', function() {
+	const netconfC = fs.readFileSync(path.join(__dirname, '..', 'openmeshd', 'src', 'netconf.c'), 'utf8');
+	assert.ok(netconfC.includes('has_gen && gen != nc->generation'),
+		'confirm AND rollback both gen-gated in netconf.c');
+	const ubusC = fs.readFileSync(path.join(__dirname, '..', 'openmeshd', 'src', 'ubus_api.c'), 'utf8');
+	assert.ok(ubusC.includes('"gen", BLOBMSG_TYPE_INT32'),
+		'gen policy declared');
+	assert.ok(ubusC.includes('"generation"'),
+		'replies expose generation');
+	/* agent auto-confirm is internal (its own current txn), never proxied */
+	const snetC = fs.readFileSync(path.join(__dirname, '..', 'openmeshd', 'src', 'session_net.c'), 'utf8');
+	assert.ok(snetC.includes('om_netconf_confirm(agent_netconf, 0, false)'),
+		'agent confirm passes no foreign gen');
+});
+
 console.log(results.join('\n'));
 console.log(`\ntest_ports_ui: ${pass} PASS, ${fail} FAIL`);
 process.exit(fail > 0 ? 1 : 0);

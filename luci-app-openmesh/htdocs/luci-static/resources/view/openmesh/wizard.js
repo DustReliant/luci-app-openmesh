@@ -14,8 +14,10 @@ var callPortPlan    = rpc.declare({ object: 'openmesh', method: 'port_plan',
 var callPortApply   = rpc.declare({ object: 'openmesh', method: 'port_apply',
 				   params: [ 'device', 'ack_unknown' ] });
 var callRoaming    = rpc.declare({ object: 'openmesh', method: 'roaming_apply' });
-var callConfirm    = rpc.declare({ object: 'openmesh', method: 'apply_confirm' });
-var callRollback   = rpc.declare({ object: 'openmesh', method: 'apply_rollback' });
+var callConfirm    = rpc.declare({ object: 'openmesh', method: 'apply_confirm',
+				   params: [ 'gen' ] });
+var callRollback   = rpc.declare({ object: 'openmesh', method: 'apply_rollback',
+				   params: [ 'gen' ] });
 
 /* dropdown entries: physical br-lan members only (m19) */
 function lanPortOptions(ports) {
@@ -102,6 +104,9 @@ return view.extend({
 		var wiredEnable, wiredMode, wiredPort, wiredInfo, wiredPlan;
 		var applyBtn, applyResult, lastPlan = null;
 		var portList = data.ports || [];
+		/* m22-2: confirm/rollback are bound to the transaction they
+		 * belong to -- a stale page must never bless a newer txn */
+		var txnGen = null;
 
 		function syncLanPorts() {
 			/* wired leg only exists under batman-adv (mode B) */
@@ -112,6 +117,9 @@ return view.extend({
 			var left = reply.confirm_window || 30;
 			var key = reply.key || '';
 
+			txnGen = (reply.generation !== undefined &&
+				  reply.generation !== null) ?
+				reply.generation : null;
 			statusLine.textContent =
 				_('Mesh applied. Key: %s - confirming in %d s')
 					.format(key, left);
@@ -147,7 +155,7 @@ return view.extend({
 		var keepBtn = E('button', {
 			'class': 'btn cbi-button cbi-button-save',
 			'click': function() {
-				return callConfirm().then(function() {
+				return callConfirm(txnGen).then(function() {
 					statusLine.textContent =
 						_('Configuration kept.');
 				}, function() {
@@ -160,7 +168,7 @@ return view.extend({
 		var undoBtn = E('button', {
 			'class': 'btn cbi-button cbi-button-remove',
 			'click': function() {
-				return callRollback().then(function() {
+				return callRollback(txnGen).then(function() {
 					statusLine.textContent =
 						_('Rolled back.');
 				}, function() {
@@ -342,6 +350,9 @@ return view.extend({
 				return;
 			}
 			if (rv.result === 'applied') {
+				txnGen = (rv.generation !== undefined &&
+					  rv.generation !== null) ?
+					rv.generation : null;
 				applyResult.style.color = '#4CAF50';
 				applyResult.textContent = _('Wired backhaul applied.') +
 					' ' + _('Confirm with "Keep configuration" within %d s')

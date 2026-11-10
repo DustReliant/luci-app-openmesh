@@ -27,6 +27,7 @@
 
 #include "lanports.h"
 #include "netconf.h"
+#include "store.h"
 
 #define TXN_MARKER "txn.pending"
 
@@ -62,12 +63,23 @@ static void reload_network(void)
 		system("/sbin/wifi up >/dev/null 2>&1");
 }
 
+/*
+ * m22-2: uncommitted uci-CLI deltas live in /tmp/.uci/<pkg> and would
+ * silently merge into the NEXT commit by ANYONE. After restoring a
+ * snapshot (rollback / recovery / apply-abort) they must not survive,
+ * or a half-run hybrid script could re-corrupt the restored file.
+ */
+static void drop_uci_staging(void)
+{
+	system("rm -f /tmp/.uci/network /tmp/.uci/wireless 2>/dev/null");
+}
+
 static void txn_timer_cb(struct uloop_timeout *t)
 {
 	struct om_netconf *nc = container_of(t, struct om_netconf, timer);
 
 	ULOG_ERR("netconf: confirm deadline hit, rolling back\n");
-	om_netconf_rollback(nc);
+	om_netconf_rollback(nc, 0, false);
 }
 
 /* Pick a radio device name for the requested band; "" = error. */
@@ -260,10 +272,20 @@ int om_netconf_mesh_apply(struct om_netconf *nc, const char *state_dir,
 fail:
 	if (cw)
 		uci_free_context(cw);
-	for (int i = 0; i < nc->n_files; i++)
+	/* m22-2: abort == immediate rollback. Restore every snapshot we
+	 * managed to take and drop half-run uci-CLI staging, so a failed
+	 * apply leaves no committed wireless residue (the runtime was
+	 * never reloaded, so file restoration also matches runtime). */
+	for (int i = 0; i < nc->n_files; i++) {
+		if (copy_file(nc->bak_files[i], nc->dest_files[i]) < 0)
+			ULOG_ERR("netconf: restore of %s FAILED on abort\n",
+				 nc->dest_files[i]);
 		unlink(nc->bak_files[i]);
+	}
+	drop_uci_staging();
 	unlink(marker);
 	nc->n_files = 0;
+	nc->active = false;
 	return -1;
 }
 
@@ -460,17 +482,30 @@ int om_netconf_roaming_apply(struct om_netconf *nc, const char *state_dir,
 	return 0;
 
 fail:
-	for (int i = 0; i < nc->n_files; i++)
+	for (int i = 0; i < nc->n_files; i++) {
+		if (copy_file(nc->bak_files[i], nc->dest_files[i]) < 0)
+			ULOG_ERR("netconf: restore of %s FAILED on abort\n",
+				 nc->dest_files[i]);
 		unlink(nc->bak_files[i]);
+	}
+	drop_uci_staging();
 	unlink(marker);
 	nc->n_files = 0;
+	nc->active = false;
 	return -1;
 }
 
-int om_netconf_confirm(struct om_netconf *nc)
+int om_netconf_confirm(struct om_netconf *nc, uint32_t gen, bool has_gen)
 {
 	if (!nc->active)
 		return -1;
+	/* m22-2: a confirm carrying an id may only bless THAT transaction;
+	 * an old UI page must never confirm a newer one by accident */
+	if (has_gen && gen != nc->generation) {
+		ULOG_WARN("netconf: confirm for gen %u rejected "
+			  "(active gen %u)\n", gen, nc->generation);
+		return -1;
+	}
 	uloop_timeout_cancel(&nc->timer);
 	for (int i = 0; i < nc->n_files; i++)
 		unlink(nc->bak_files[i]);
@@ -519,22 +554,37 @@ static void purge_om_sections(void)
 		"uci -q delete wireless.$(uci -q show wireless | "
 		"grep om_managed | head -1 | cut -d. -f2 | cut -d= -f1); "
 		"uci -q commit wireless; done");
-	system("uci -q delete network.om_bat; uci -q delete network.om_mesh; "
-	       "for S in $(uci -q show network 2>/dev/null | "
-	       "sed -n \"s/^network\\.\\(om_eth_[A-Za-z0-9_]*\\)=interface$/"
-	       "\\1/p\"); do uci -q delete network.$S; done; "
-	       "uci -q commit network 2>/dev/null");
+	/* m22-2: a section delete does NOT remove its bridge ports entry
+	 * (M9 lesson #3) -- del_list the members explicitly, then drop the
+	 * sections, then commit */
+	system("BR=$(uci -q show network | sed -n "
+		"\"s/network\\.\\([^.]*\\)\\.name='br-lan'/\\1/p\"); "
+		"[ -n \"$BR\" ] && uci -q del_list network.$BR.ports='om_bat'; "
+		"uci -q delete network.om_bat; uci -q delete network.om_mesh; "
+		"for S in $(uci -q show network 2>/dev/null | "
+		"sed -n \"s/^network\\.\\(om_eth_[A-Za-z0-9_]*\\)=interface$/"
+		"\\1/p\"); do "
+		"DEV=$(uci -q get network.$S.device 2>/dev/null); "
+		"[ -n \"$DEV\" ] && [ -n \"$BR\" ] && "
+		"uci -q del_list network.$BR.ports=\"$DEV\"; "
+		"uci -q delete network.$S; done; "
+		"uci -q commit network 2>/dev/null");
 }
 
-int om_netconf_rollback(struct om_netconf *nc)
+int om_netconf_rollback(struct om_netconf *nc, uint32_t gen, bool has_gen)
 {
-	uint32_t gen = nc->generation;
+	uint32_t gen_ = nc->generation;
 	int rc = 0;
 
 	bool keep_committed = false;
 
 	if (!nc->active)
 		return -1;
+	if (has_gen && gen != nc->generation) {
+		ULOG_WARN("netconf: rollback for gen %u rejected "
+			  "(active gen %u)\n", gen, nc->generation);
+		return -1;
+	}
 	uloop_timeout_cancel(&nc->timer);
 	for (int i = 0; i < nc->n_files; i++) {
 		if (snapshot_has_om(nc->bak_files[i]))
@@ -546,6 +596,9 @@ int om_netconf_rollback(struct om_netconf *nc)
 		}
 		unlink(nc->bak_files[i]);
 	}
+	/* restored files are authoritative again: any half-run uci-CLI
+	 * staging must die before the purge commit resurrects it */
+	drop_uci_staging();
 	if (!keep_committed)
 		purge_om_sections();
 	else
@@ -554,11 +607,14 @@ int om_netconf_rollback(struct om_netconf *nc)
 	unlink(nc->marker);
 	nc->active = false;
 	nc->committed = false;
+	/* re-align the persisted wired-leg intent with what actually
+	 * survived in network config (m22-2) */
+	om_store_sync_backhaul_ports();
 	reload_network();
-	ULOG_NOTE("netconf: transaction %u rolled back%s\n", gen,
+	ULOG_NOTE("netconf: transaction %u rolled back%s\n", gen_,
 		  rc ? " (with errors)" : "");
 	if (nc->on_done)
-		nc->on_done(false, gen, nc->priv);
+		nc->on_done(false, gen_, nc->priv);
 	return rc;
 }
 
@@ -599,5 +655,7 @@ void om_netconf_recover(struct om_netconf *nc, const char *state_dir)
 	}
 	unlink(marker);
 	nc->active = false;
+	drop_uci_staging();
+	om_store_sync_backhaul_ports();
 	reload_network();
 }
