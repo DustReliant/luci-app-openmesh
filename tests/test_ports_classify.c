@@ -219,6 +219,39 @@ int main(void)
 		CHECK(!v_of(&br).eligible && !strcmp(v_of(&br).reason, "virtual"));
 	}
 
+	/* ---- Phase 7.2 apply gate ---- */
+	{
+		struct om_port_verdict ok = { .eligible = true, .reason = "" };
+		struct om_port_verdict mu = { .eligible = false, .reason = "mgmt_unknown" };
+		struct om_port_verdict mg = { .eligible = false, .reason = "mgmt" };
+		struct om_port_verdict wan = { .eligible = false, .reason = "wan" };
+
+		CHECK(om_port_apply_gate(&ok, false) == OM_APPLY_ALLOW);
+		CHECK(om_port_apply_gate(&ok, true) == OM_APPLY_ALLOW);
+		/* the ONLY overridable block */
+		CHECK(om_port_apply_gate(&mu, false) == OM_APPLY_NEED_ACK);
+		CHECK(om_port_apply_gate(&mu, true) == OM_APPLY_ALLOW);
+		/* everything else is absolute */
+		CHECK(om_port_apply_gate(&mg, true) == OM_APPLY_DENY);
+		CHECK(om_port_apply_gate(&wan, true) == OM_APPLY_DENY);
+		CHECK(om_port_apply_gate(NULL, true) == OM_APPLY_DENY);
+	}
+	/* every blocked reason token denies even with ack */
+	{
+		const char *toks[] = { "mgmt", "wan", "vlan", "mesh", "dsa_cpu",
+				       "pppoe", "virtual", "wireless", "master",
+				       "not_exist" };
+		size_t i;
+
+		for (i = 0; i < sizeof(toks) / sizeof(toks[0]); i++) {
+			struct om_port_verdict v = { .eligible = false, .reason = "" };
+
+			snprintf(v.reason, sizeof(v.reason), "%s", toks[i]);
+			if (strcmp(toks[i], "mgmt_unknown"))
+				CHECK(om_port_apply_gate(&v, true) == OM_APPLY_DENY);
+		}
+	}
+
 	printf("test_ports_classify: %d PASS, %d FAIL\n", pass, fail);
 	return fail ? 1 : 0;
 }

@@ -35,12 +35,15 @@ const ctx = vm.createContext({
 	_: function(s) { return s; }
 });
 [grabFn('dropdownPorts'), grabFn('riskText'), grabFn('roleText'),
-	grabFn('portOptionLabel')].forEach(s => vm.runInContext(s, ctx));
+	grabFn('portOptionLabel'), grabFn('planNeedsAck'), grabFn('applyEnabled')]
+	.forEach(s => vm.runInContext(s, ctx));
 
 const dropdownPorts = ctx.dropdownPorts;
 const riskText = ctx.riskText;
 const roleText = ctx.roleText;
 const portOptionLabel = ctx.portOptionLabel;
+const planNeedsAck = ctx.planNeedsAck;
+const applyEnabled = ctx.applyEnabled;
 
 const AX_PORTS = [
 	{ device: 'lan1', type: 'ethernet', eligible: false, reason: 'mgmt', management: 'yes' },
@@ -181,6 +184,75 @@ test('P15: preview lists render only provided items', function() {
 	assert.strictEqual(planListLen(undefined), 0);
 	assert.strictEqual(planListLen([]), 0);
 	assert.strictEqual(planListLen(['a', 'b']), 2);
+});
+
+/* ---- Phase 7.2: apply gating (mirrors om_port_apply_gate semantics) ---- */
+
+const OK_PLAN = { ok: true, checks: [{ name: 'mgmt', state: 'pass' }] };
+const ACK_PLAN = { ok: false,
+	checks: [{ name: 'mgmt', state: 'unknown' },
+		 { name: 'peer', state: 'unknown' }] };
+const DENY_PLAN = { ok: false,
+	checks: [{ name: 'mgmt', state: 'blocked' }] };
+const DENY_WAN = { ok: false,
+	checks: [{ name: 'wan', state: 'blocked' }] };
+
+test('P16: apply button enabled for eligible plans', function() {
+	assert.strictEqual(applyEnabled(OK_PLAN), true);
+	assert.strictEqual(applyEnabled(null), false);
+	assert.strictEqual(applyEnabled(undefined), false);
+	assert.strictEqual(applyEnabled({ ok: false, checks: [] }), false);
+});
+
+test('P17: mgmt-unknown is the only risk-acknowledged path', function() {
+	assert.strictEqual(planNeedsAck(ACK_PLAN), true);
+	assert.strictEqual(planNeedsAck(OK_PLAN), false);
+	assert.strictEqual(planNeedsAck(DENY_PLAN), false);
+	assert.strictEqual(planNeedsAck(DENY_WAN), false);
+	assert.strictEqual(planNeedsAck(null), false);
+	/* peer unknown alone must NOT unlock the button */
+	assert.strictEqual(planNeedsAck({ ok: false,
+		checks: [{ name: 'peer', state: 'unknown' }] }), false);
+	assert.strictEqual(applyEnabled({ ok: false,
+		checks: [{ name: 'peer', state: 'unknown' }] }), false);
+	/* ack plan enables the button (goes through the modal) */
+	assert.strictEqual(applyEnabled(ACK_PLAN), true);
+});
+
+test('P18: apply click routes ok vs needs-ack correctly', function() {
+	/* mirror of the click handler branching */
+	function route(plan) {
+		if (plan && plan.ok) return 'direct';
+		if (planNeedsAck(plan)) return 'modal';
+		return 'nothing';
+	}
+	assert.strictEqual(route(OK_PLAN), 'direct');
+	assert.strictEqual(route(ACK_PLAN), 'modal');
+	assert.strictEqual(route(DENY_WAN), 'nothing');
+	assert.strictEqual(route(null), 'nothing');
+});
+
+test('P19: ack retry sends ack_unknown=true after the modal', function() {
+	assert.ok(code.includes('doApply(true)'), 'modal retries with ack');
+	assert.ok(code.includes('doApply(false)') || code.includes('doApply(false);'),
+		'eligible plans apply without ack');
+	assert.ok(code.includes('ui.showModal') && code.includes('ui.hideModal'),
+		'modal used for risk confirmation');
+	assert.ok(code.includes("'ack_unknown'"), 'rpc param declared');
+});
+
+test('P20: apply result vocabulary handled', function() {
+	['applied', 'need_ack', 'no_mesh'].forEach(r => {
+		assert.ok(code.indexOf("'" + r + "'") > 0, r + ' branch exists');
+	});
+	/* denied (and anything unknown) falls to the red fallback branch
+	 * with the reason mapped through riskText */
+	assert.ok(/else \{\s*applyResult\.style\.color = '#F44336';[\s\S]*?riskText\(rv\.reason\)/
+		.test(code), 'fallback renders reason via riskText');
+	/* backend re-gates: a need_ack reply re-opens the modal, it never
+	 * silently applies */
+	assert.ok(code.includes("rv.result === 'need_ack'") &&
+		code.includes('askRisk()'), 'need_ack re-prompts');
 });
 
 console.log(results.join('\n'));

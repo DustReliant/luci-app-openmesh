@@ -52,6 +52,11 @@ static const struct blobmsg_policy om_portplan_policy[2] = {
 	{ "mode", BLOBMSG_TYPE_STRING },
 };
 
+static const struct blobmsg_policy om_portapply_policy[2] = {
+	{ "device", BLOBMSG_TYPE_STRING },
+	{ "ack_unknown", BLOBMSG_TYPE_INT8 },
+};
+
 static void node_to_blob(const struct om_node_info *n)
 {
 	char hex[OM_ID_HEX_LEN];
@@ -759,6 +764,78 @@ static int om_portplan(struct ubus_context *ctx, struct ubus_object *obj,
 	return ubus_send_reply(ctx, req, b.head);
 }
 
+/*
+ * m22 (Phase 7.2): attach one physical port to the wired backhaul leg.
+ * The 7.1 plan gate runs FRESH here (never trusts the frontend), the
+ * actual UCI work reuses the m19 hybrid transaction (30s auto-rollback
+ * + snapshot restore), and agents receive the selection via the m19
+ * session push (they re-validate and skip unknown port names).
+ */
+static int om_port_apply(struct ubus_context *ctx, struct ubus_object *obj,
+			 struct ubus_request_data *req, const char *method,
+			 struct blob_attr *msg)
+{
+	struct om_ubus *u = OM_HANDLER_CTX(obj);
+	struct blob_attr *tb[2] = { NULL, NULL };
+	struct om_port_plan plan;
+	char mesh_id[33], key[33], band[8];
+	char lan_ports[OM_PORTS_SPEC_MAX + 1];
+	const char *dev;
+	bool ack = false;
+	int gate;
+
+	(void)method;
+	if (!u->netconf)
+		return UBUS_STATUS_NOT_FOUND;
+	blobmsg_parse(om_portapply_policy, 2, tb, blob_data(msg), blob_len(msg));
+	dev = tb[0] ? blobmsg_get_string(tb[0]) : NULL;
+	if (tb[1])
+		ack = blobmsg_get_u8(tb[1]);
+	if (!dev || !*dev || !om_lan_ports_valid(dev))
+		return UBUS_STATUS_INVALID_ARGUMENT;
+
+	/* fresh server-side validation (stale UI lists are not authority) */
+	if (om_port_plan(dev, "wired_preferred", &plan) < 0)
+		return UBUS_STATUS_INVALID_ARGUMENT;
+	gate = om_port_apply_gate(&plan.entry.v, ack);
+	if (gate != OM_APPLY_ALLOW) {
+		blob_buf_init(&b, 0);
+		blobmsg_add_string(&b, "result",
+			gate == OM_APPLY_NEED_ACK ? "need_ack" : "denied");
+		blobmsg_add_string(&b, "device", dev);
+		blobmsg_add_string(&b, "reason",
+			plan.entry.v.reason[0] ? plan.entry.v.reason : "blocked");
+		return ubus_send_reply(ctx, req, b.head);
+	}
+
+	/* the wired leg rides on an existing mesh: no mesh, no leg */
+	if (om_store_backhaul_get(mesh_id, sizeof(mesh_id), key,
+				  sizeof(key), band, sizeof(band),
+				  lan_ports, sizeof(lan_ports)) < 0 ||
+	    !*mesh_id || !*key) {
+		blob_buf_init(&b, 0);
+		blobmsg_add_string(&b, "result", "no_mesh");
+		return ubus_send_reply(ctx, req, b.head);
+	}
+
+	/* m19 transaction: re-home old om_eth, move the port out of
+	 * br-lan, create om_eth_<port>; 30s confirm or full rollback */
+	if (om_netconf_mesh_apply(u->netconf, u->state_dir, mesh_id,
+				  *band ? band : "5g", key,
+				  OM_BH_HYBRID, dev) < 0)
+		return UBUS_STATUS_UNKNOWN_ERROR;
+	om_store_backhaul_set(mesh_id, key, band, dev);
+	if (u->snet)
+		om_snet_push_mesh(u->snet, mesh_id, *band ? band : "5g",
+				  key, "hybrid", dev);
+
+	blob_buf_init(&b, 0);
+	blobmsg_add_string(&b, "result", "applied");
+	blobmsg_add_string(&b, "device", dev);
+	blobmsg_add_u32(&b, "confirm_window", OM_TXN_TIMEOUT);
+	return ubus_send_reply(ctx, req, b.head);
+}
+
 static int om_roaming_apply(struct ubus_context *ctx, struct ubus_object *obj,
 			    struct ubus_request_data *req, const char *method,
 			    struct blob_attr *msg)
@@ -814,6 +891,7 @@ static const struct ubus_method om_methods[] = {
 	UBUS_METHOD_NOARG("get_lan_ports", om_get_lan_ports),
 	UBUS_METHOD_NOARG("ports", om_ports),
 	UBUS_METHOD("port_plan", om_portplan, om_portplan_policy),
+	UBUS_METHOD("port_apply", om_port_apply, om_portapply_policy),
 	UBUS_METHOD("roaming_apply", om_roaming_apply, om_roam_policy),
 };
 

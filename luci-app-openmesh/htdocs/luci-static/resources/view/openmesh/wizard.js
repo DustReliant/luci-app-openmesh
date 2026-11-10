@@ -11,6 +11,8 @@ var callLanPorts    = rpc.declare({ object: 'openmesh', method: 'get_lan_ports' 
 var callPorts       = rpc.declare({ object: 'openmesh', method: 'ports' });
 var callPortPlan    = rpc.declare({ object: 'openmesh', method: 'port_plan',
 				   params: [ 'device', 'mode' ] });
+var callPortApply   = rpc.declare({ object: 'openmesh', method: 'port_apply',
+				   params: [ 'device', 'ack_unknown' ] });
 var callRoaming    = rpc.declare({ object: 'openmesh', method: 'roaming_apply' });
 var callConfirm    = rpc.declare({ object: 'openmesh', method: 'apply_confirm' });
 var callRollback   = rpc.declare({ object: 'openmesh', method: 'apply_rollback' });
@@ -72,6 +74,17 @@ function portOptionLabel(p) {
 	return p.device;
 }
 
+/* Phase 7.2: the only overridable block is mgmt-unknown (user ack) */
+function planNeedsAck(plan) {
+	return !!(plan && !plan.ok && (plan.checks || []).some(function(c) {
+		return c && c.name === 'mgmt' && c.state === 'unknown';
+	}));
+}
+
+function applyEnabled(plan) {
+	return !!(plan && (plan.ok || planNeedsAck(plan)));
+}
+
 return view.extend({
 	load: function() {
 		return Promise.all([
@@ -87,6 +100,7 @@ return view.extend({
 	render: function(data) {
 		var nameInput, bandSel, modeSel, keyInput, lanPortsSel, statusLine;
 		var wiredEnable, wiredMode, wiredPort, wiredInfo, wiredPlan;
+		var applyBtn, applyResult, lastPlan = null;
 		var portList = data.ports || [];
 
 		function syncLanPorts() {
@@ -233,8 +247,14 @@ return view.extend({
 		}
 
 		function renderPlan(plan) {
+			lastPlan = plan;
 			while (wiredPlan.firstChild)
 				wiredPlan.removeChild(wiredPlan.firstChild);
+			if (applyBtn)
+				applyBtn.disabled = !(wiredEnable.checked &&
+					wiredPort.value && applyEnabled(plan));
+			if (applyResult)
+				applyResult.textContent = '';
 			if (!plan) return;
 			var head = E('div', { 'style': 'font-weight:bold;font-size:13px' },
 				_('Preview (read-only, nothing is executed)'));
@@ -312,6 +332,60 @@ return view.extend({
 			});
 		}
 
+		/* ---- Phase 7.2: apply with the mandatory backend gate ---- */
+
+		function renderApplyResult(rv) {
+			applyResult.style.color = '#888';
+			if (!rv) {
+				applyResult.style.color = '#F44336';
+				applyResult.textContent = _('Apply failed');
+				return;
+			}
+			if (rv.result === 'applied') {
+				applyResult.style.color = '#4CAF50';
+				applyResult.textContent = _('Wired backhaul applied.') +
+					' ' + _('Confirm with "Keep configuration" within %d s')
+						.format(rv.confirm_window || 30);
+			} else if (rv.result === 'need_ack') {
+				/* backend re-checked and still cannot exclude the
+				 * management path: ask, then retry with the ack */
+				askRisk();
+			} else if (rv.result === 'no_mesh') {
+				applyResult.style.color = '#F44336';
+				applyResult.textContent = _('Create a mesh network first');
+			} else {
+				applyResult.style.color = '#F44336';
+				applyResult.textContent = _('Apply denied') +
+					(rv.reason ? ' — ' + riskText(rv.reason) : '');
+			}
+		}
+
+		function doApply(ack) {
+			callPortApply(wiredPort.value, !!ack).then(renderApplyResult,
+				function() { renderApplyResult(null); });
+		}
+
+		function askRisk() {
+			ui.showModal(_('Risk acknowledgement'), [
+				E('p', { 'style': 'max-width:420px' },
+				  _('Multiple LAN ports have carrier; the management session may ride any of them. Applying may disconnect you.')),
+				E('div', { 'class': 'right' }, [
+					E('button', {
+						'class': 'btn',
+						'click': function() { ui.hideModal(); }
+					}, _('Cancel')),
+					' ',
+					E('button', {
+						'class': 'btn cbi-button cbi-button-remove important',
+						'click': function() {
+							ui.hideModal();
+							doApply(true);
+						}
+					}, _('Risk acknowledged, apply anyway'))
+				])
+			]);
+		}
+
 		var wiredSection = E('div', { 'class': 'cbi-section' }, [
 			E('div', { 'class': 'cbi-value' }, [
 				E('label', { 'class': 'cbi-value-title' },
@@ -369,9 +443,27 @@ return view.extend({
 					wiredInfo = E('div', { 'style': 'min-width:260px' }))
 			]),
 			E('div', { 'class': 'cbi-value' }, [
-				E('label', { 'class': 'cbi-value-title' }, ' '),
+				E('label', { 'class': 'cbi-value-title' }, ' '),
 				E('div', { 'class': 'cbi-value-field' },
 					wiredPlan = E('div', { 'style': 'min-width:320px' }))
+			]),
+			E('div', { 'class': 'cbi-value' }, [
+				E('label', { 'class': 'cbi-value-title' }, ' '),
+				E('div', { 'class': 'cbi-value-field' }, [
+					applyBtn = E('button', {
+						'class': 'btn cbi-button cbi-button-apply',
+						'disabled': true,
+						'click': function() {
+							if (!wiredPort.value) return;
+							if (lastPlan && lastPlan.ok)
+								doApply(false);
+							else if (planNeedsAck(lastPlan))
+								askRisk();
+						}
+					}, _('Apply wired backhaul (30s auto-rollback)')),
+					' ',
+					applyResult = E('span', { 'style': 'font-size:12px' }, '')
+				])
 			]),
 			E('p', { 'style': 'color:#999;font-size:small' },
 			  _('This phase only previews; no network configuration is changed.'))

@@ -55,4 +55,18 @@ void om_port_classify(const struct om_port_facts *f,
 /* token -> human text is the frontend's job (i18n); keep tokens stable */
 const char *om_port_mgmt_str(int mgmt);
 
+/* ---- apply gate (Phase 7.2) ---- */
+#define OM_APPLY_ALLOW    0	/* eligible: proceed */
+#define OM_APPLY_NEED_ACK 1	/* mgmt_unknown: user must acknowledge */
+#define OM_APPLY_DENY     2	/* never, regardless of acknowledgement */
+
+/*
+ * Write-path gate for port_apply. Eligible ports pass; the ONLY
+ * overridable block is mgmt_unknown (multiple live br-lan members --
+ * the user may positively confirm after seeing them). Every other
+ * block (mgmt/wan/vlan/dsa_cpu/mesh/virtual/master/not_exist) is
+ * absolute: acknowledgement changes nothing.
+ */
+int om_port_apply_gate(const struct om_port_verdict *v, bool ack_unknown);
+
 #endif

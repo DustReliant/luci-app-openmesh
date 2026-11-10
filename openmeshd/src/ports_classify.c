@@ -29,6 +29,17 @@ const char *om_port_mgmt_str(int mgmt)
 	}
 }
 
+int om_port_apply_gate(const struct om_port_verdict *v, bool ack_unknown)
+{
+	if (!v || !v->eligible) {
+		if (v && !strcmp(v->reason, "mgmt_unknown"))
+			return ack_unknown ?
+				OM_APPLY_ALLOW : OM_APPLY_NEED_ACK;
+		return OM_APPLY_DENY;
+	}
+	return OM_APPLY_ALLOW;
+}
+
 void om_port_classify(const struct om_port_facts *f,
 		      struct om_port_verdict *v)
 {

@@ -29,6 +29,7 @@
 - ✅ 状态迁移事件日志（上下线/链路建立断开/采集故障恢复，只报真实变化）
 - ✅ 链路短时趋势（≈3 分钟有界采样，缺口断线呈现，非长期历史）
 - ✅ 物理网口发现与有线回程预览（Phase 7.1：ubus ports/port_plan 只读发现+预检+配置预览，管理路径/WAN/DSA CPU 口/VLAN 风险识别，零网络改动）
+- ✅ 有线回程写路径（Phase 7.2：port_apply 服务端重验门禁+唯一可确认风险 mgmt_unknown+复用 30s 事务与代理推送）
 - ✅ 布局持久化（localStorage，按控制器 node_id 网络隔离）
 - ✅ 5 秒实时刷新（新节点自动加入，已有节点位置不变）
 - ✅ 采集健康指示（ok/stale/failed，与节点在线状态解耦）
@@ -132,7 +133,7 @@ node tests/test_topology_frontend.js   # 布局持久化+安全 23 项
 node tests/test_phase62.js             # 智能布局+双链路 22 项
 node tests/test_topology_clients.js    # 客户端画布渲染 13 项
 node tests/test_phase63_status.js      # 拓扑状态模型+质量分级+事件 25 项
-node tests/test_ports_ui.js            # 网口下拉/预检前端 15 项
+node tests/test_ports_ui.js            # 网口下拉/预检/应用门控前端 20 项
 node tests/test_wizard_lanports.js     # 向导 LAN 口下拉 9 项
 
 # 命令层测试（假 batctl / 假 uci）
@@ -184,5 +185,6 @@ GPL-3.0-or-later（依赖 libsodium 为 ISC、libubox/libubus 为 LGPL-2.1）
 | [m19-wired-lan-select.md](docs/design/m19-wired-lan-select.md) | 有线回程 LAN 口选择（Phase 6.3 + 自动识别路线） |
 | [m20-topology-status.md](docs/design/m20-topology-status.md) | 拓扑状态可视化与交互完善（四态/质量分级/采集解耦/事件/短时趋势） |
 | [m21-eth-port-discovery.md](docs/design/m21-eth-port-discovery.md) | 物理网口发现与有线回程预览（Phase 7.0/7.1 + 7.2 建议） |
+| [m22-eth-port-apply.md](docs/design/m22-eth-port-apply.md) | 有线回程写路径 port_apply（Phase 7.2 第一片） |
 | [scripts/openwrt-patches/](scripts/openwrt-patches/) | rtl8188ee 驱动补丁 + 自编译指南 |
 | [ADR 列表](docs/decisions/) | 架构决策记录（8 篇） |

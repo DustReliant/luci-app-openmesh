@@ -525,3 +525,33 @@ msgstr "已被占用"
 
 msgid "Unused port"
 msgstr "未使用端口"
+
+msgid "Apply wired backhaul (30s auto-rollback)"
+msgstr "应用有线回程（30 秒自动回滚）"
+
+msgid "Risk acknowledgement"
+msgstr "风险确认"
+
+msgid "Multiple LAN ports have carrier; the management session may ride any of them. Applying may disconnect you."
+msgstr "多个 LAN 口有 carrier，管理会话可能在其中任意一口上，应用后可能导致管理连接中断。"
+
+msgid "Cancel"
+msgstr "取消"
+
+msgid "Risk acknowledged, apply anyway"
+msgstr "已确认风险，仍然应用"
+
+msgid "Wired backhaul applied."
+msgstr "有线回程已应用。"
+
+msgid "Confirm with \"Keep configuration\" within %d s"
+msgstr "%d 秒内点击上方「保留配置」确认，超时自动回滚"
+
+msgid "Apply denied"
+msgstr "应用被拒绝"
+
+msgid "Create a mesh network first"
+msgstr "请先创建 Mesh 网络"
+
+msgid "Apply failed"
+msgstr "应用失败"
