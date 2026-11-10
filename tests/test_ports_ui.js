@@ -270,6 +270,15 @@ test('P21: confirm/rollback carry the transaction generation', function() {
 		'mesh_create reply generation captured');
 	assert.ok(/rv\.result === 'applied'[\s\S]{0,200}rv\.generation/.test(code),
 		'port_apply reply generation captured');
+	/* roaming opens its own txn: Keep must bind to THAT gen, else the
+	 * 30s window silently rolls the roaming back (found in review) */
+	assert.ok(/callRoaming\(\)\.then\(function\(rv\)[\s\S]{0,300}rv\.generation/
+		.test(code), 'roaming reply generation captured');
+	/* null gen never travels the wire (compat with old daemons) */
+	assert.ok(code.includes('txnGen === null ? callConfirm()'),
+		'null gen omitted on confirm');
+	assert.ok(code.includes('txnGen === null ? callRollback()'),
+		'null gen omitted on rollback');
 });
 
 test('P22: backend rejects mismatched generation (source contract)', function() {

@@ -155,7 +155,11 @@ return view.extend({
 		var keepBtn = E('button', {
 			'class': 'btn cbi-button cbi-button-save',
 			'click': function() {
-				return callConfirm(txnGen).then(function() {
+				/* no gen (old daemon / unknown reply) = classic
+				 * confirm-current behaviour; never send null */
+				var p = txnGen === null ? callConfirm() :
+					callConfirm(txnGen);
+				return p.then(function() {
 					statusLine.textContent =
 						_('Configuration kept.');
 				}, function() {
@@ -168,7 +172,9 @@ return view.extend({
 		var undoBtn = E('button', {
 			'class': 'btn cbi-button cbi-button-remove',
 			'click': function() {
-				return callRollback(txnGen).then(function() {
+				var p = txnGen === null ? callRollback() :
+					callRollback(txnGen);
+				return p.then(function() {
 					statusLine.textContent =
 						_('Rolled back.');
 				}, function() {
@@ -182,6 +188,11 @@ return view.extend({
 			'class': 'btn cbi-button cbi-button-apply',
 			'click': function() {
 				return callRoaming().then(function(rv) {
+					/* roaming opens its OWN transaction: the
+					 * Keep button must bind to THIS gen */
+					txnGen = (rv.generation !== undefined &&
+						  rv.generation !== null) ?
+						rv.generation : null;
 					statusLine.textContent =
 						_('Roaming (k/v/r) applied. Domain: %s - confirm with Keep')
 							.format(rv.mobility_domain || '');
