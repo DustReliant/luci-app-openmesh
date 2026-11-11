@@ -23,6 +23,7 @@
 #include "topology.h"
 #include "lanports.h"
 #include "ports.h"
+#include "discovery.h"
 
 
 static struct blob_buf b;
@@ -682,7 +683,119 @@ static const char *port_net_type(const struct om_port_facts *f)
 	return "ethernet";
 }
 
-static void port_entry_blob(const struct om_port_entry *pe)
+/* ---- m23: wired-peer hints + auto-join ---- */
+
+#define OM_HINT_FRESH_S 35	/* ~3 announce periods = still there */
+
+struct om_hint_view {
+	char ifname[16];
+	char label[40];		/* adopted name or short id */
+	bool recent;
+	bool stable;
+};
+
+/* peer label: adopted nodes carry their user-given name */
+static void hint_peer_label(const uint8_t node[OM_ID_LEN], char out[],
+			    size_t outsz)
+{
+	struct om_stored_node sn;
+
+	if (om_store_adopted_find(node, &sn) == 0 && sn.name[0]) {
+		snprintf(out, outsz, "%s", sn.name);
+		return;
+	}
+	char hex[OM_ID_HEX_LEN];
+
+	om_id_to_hex(node, hex);
+	snprintf(out, outsz, "%.8s…", hex);
+}
+
+static int hint_views(struct om_ubus *u, struct om_hint_view out[], int max)
+{
+	struct om_disc_hint raw[OM_HINT_MAX];
+	time_t now = time(NULL);
+	int n, i, m = 0;
+
+	if (!u->disc)
+		return 0;
+	n = om_disc_get_hints(u->disc, raw, OM_HINT_MAX);
+	for (i = 0; i < n && m < max; i++) {
+		struct om_hint_view *v = &out[m++];
+
+		snprintf(v->ifname, sizeof(v->ifname), "%s", raw[i].ifname);
+		hint_peer_label(raw[i].node, v->label, sizeof(v->label));
+		v->recent = (now - raw[i].last_seen) <= OM_HINT_FRESH_S;
+		v->stable = raw[i].count >= OM_HINT_STABLE;
+	}
+	return m;
+}
+
+static const struct om_hint_view *hint_for(struct om_hint_view hv[], int n,
+					   const char *ifname)
+{
+	int i;
+
+	for (i = 0; i < n; i++)
+		if (!strcmp(hv[i].ifname, ifname))
+			return &hv[i];
+	return NULL;
+}
+
+/*
+ * Auto-join engine (m23): fires from the discovery receive path when a
+ * port hint first reaches stability AND the operator opted in. Every
+ * safety layer still applies: fresh server-side classification (the
+ * ONLY overridable manual risk, mgmt_unknown, is NOT auto-joinable),
+ * protected/WAN/VLAN/DSA-CPU ports are ineligible, one transaction at
+ * a time, and the 30s rollback covers the whole change.
+ */
+static void om_autojoin_cb(const struct om_disc_hint *h, void *priv)
+{
+	struct om_ubus *u = priv;
+	struct om_port_entry pe[OM_PORTS_MAX];
+	struct om_port_entry *hit = NULL;
+	char mesh_id[33], key[33], band[8];
+	char lan_ports[OM_PORTS_SPEC_MAX + 1];
+	char label[40];
+	int n, i;
+
+	if (!u->snet || !u->netconf || !om_store_wired_auto())
+		return;
+
+	n = om_ports_discover(pe, OM_PORTS_MAX);
+	for (i = 0; i < n; i++)
+		if (!strcmp(pe[i].f.device, h->ifname)) {
+			hit = &pe[i];
+			break;
+		}
+	if (!hit)
+		return;
+	if (!om_autojoin_should(&hit->v, true, u->netconf->active,
+				true, h->count >= OM_HINT_STABLE)) {
+		ULOG_INFO("autojoin: %s not joinable (%s)\n", h->ifname,
+			  hit->v.reason[0] ? hit->v.reason : "busy");
+		return;
+	}
+	if (om_store_backhaul_get(mesh_id, sizeof(mesh_id), key,
+				  sizeof(key), band, sizeof(band),
+				  lan_ports, sizeof(lan_ports)) < 0 ||
+	    !*mesh_id || !*key)
+		return;
+
+	hint_peer_label(h->node, label, sizeof(label));
+	ULOG_NOTE("autojoin: mesh peer '%s' detected on %s, attaching "
+		  "wired backhaul (30s rollback)\n", label, h->ifname);
+	if (om_netconf_mesh_apply(u->netconf, u->state_dir, mesh_id,
+				  *band ? band : "5g", key,
+				  OM_BH_HYBRID, h->ifname) < 0)
+		return;
+	om_store_backhaul_set(mesh_id, key, band, h->ifname);
+	om_snet_push_mesh(u->snet, mesh_id, *band ? band : "5g", key,
+			  "hybrid", h->ifname);
+}
+
+static void port_entry_blob(const struct om_port_entry *pe,
+			    const struct om_hint_view *hv)
 {
 	void *t = blobmsg_open_table(&b, NULL);
 
@@ -700,6 +813,11 @@ static void port_entry_blob(const struct om_port_entry *pe)
 	blobmsg_add_u8(&b, "eligible", pe->v.eligible);
 	if (pe->v.reason[0])
 		blobmsg_add_string(&b, "reason", pe->v.reason);
+	/* m23: a verified mesh peer's announce is arriving on this port */
+	if (hv && hv->recent) {
+		blobmsg_add_string(&b, "mesh_peer", hv->label);
+		blobmsg_add_u8(&b, "mesh_peer_stable", hv->stable);
+	}
 	blobmsg_close_table(&b, t);
 }
 
@@ -707,9 +825,11 @@ static int om_ports(struct ubus_context *ctx, struct ubus_object *obj,
 		    struct ubus_request_data *req, const char *method,
 		    struct blob_attr *msg)
 {
+	struct om_ubus *u = OM_HANDLER_CTX(obj);
 	struct om_port_entry pe[OM_PORTS_MAX];
+	struct om_hint_view hv[OM_HINT_MAX];
 	void *a;
-	int n, i;
+	int n, i, nh;
 
 	(void)obj;
 	(void)method;
@@ -717,10 +837,11 @@ static int om_ports(struct ubus_context *ctx, struct ubus_object *obj,
 	n = om_ports_discover(pe, OM_PORTS_MAX);
 	if (n < 0)
 		return UBUS_STATUS_UNKNOWN_ERROR;
+	nh = hint_views(u, hv, OM_HINT_MAX);
 	blob_buf_init(&b, 0);
 	a = blobmsg_open_array(&b, "ports");
 	for (i = 0; i < n; i++)
-		port_entry_blob(&pe[i]);
+		port_entry_blob(&pe[i], hint_for(hv, nh, pe[i].f.device));
 	blobmsg_close_array(&b, a);
 	return ubus_send_reply(ctx, req, b.head);
 }
@@ -729,13 +850,13 @@ static int om_portplan(struct ubus_context *ctx, struct ubus_object *obj,
 		       struct ubus_request_data *req, const char *method,
 		       struct blob_attr *msg)
 {
+	struct om_ubus *u = OM_HANDLER_CTX(obj);
 	struct blob_attr *tb[2] = { NULL, NULL };
 	struct om_port_plan plan;
 	const char *dev, *mode;
 	void *a, *c, *pv;
 	int i, rc;
 
-	(void)obj;
 	(void)method;
 	blobmsg_parse(om_portplan_policy, 2, tb, blob_data(msg), blob_len(msg));
 	dev = tb[0] ? blobmsg_get_string(tb[0]) : NULL;
@@ -748,15 +869,21 @@ static int om_portplan(struct ubus_context *ctx, struct ubus_object *obj,
 	if (rc < 0)
 		return UBUS_STATUS_INVALID_ARGUMENT;
 
-	blob_buf_init(&b, 0);
-	blobmsg_add_string(&b, "device", plan.entry.f.device);
-	blobmsg_add_string(&b, "mode", plan.mode);
-	blobmsg_add_u8(&b, "ok", plan.ok);
-	blobmsg_add_u8(&b, "preview_only", true);
+	{
+		struct om_hint_view hv[OM_HINT_MAX];
+		int nh = hint_views(u, hv, OM_HINT_MAX);
 
-	a = blobmsg_open_table(&b, "port");
-	port_entry_blob(&plan.entry);
-	blobmsg_close_table(&b, a);
+		blob_buf_init(&b, 0);
+		blobmsg_add_string(&b, "device", plan.entry.f.device);
+		blobmsg_add_string(&b, "mode", plan.mode);
+		blobmsg_add_u8(&b, "ok", plan.ok);
+		blobmsg_add_u8(&b, "preview_only", true);
+
+		a = blobmsg_open_table(&b, "port");
+		port_entry_blob(&plan.entry,
+				hint_for(hv, nh, plan.entry.f.device));
+		blobmsg_close_table(&b, a);
+	}
 
 	a = blobmsg_open_array(&b, "checks");
 	for (i = 0; i < plan.n_checks; i++) {
@@ -931,6 +1058,9 @@ int om_ubus_init(struct om_ubus *u, struct om_identity *id,
 	u->id = id;
 	u->disc = disc;
 	clock_gettime(CLOCK_MONOTONIC, &u->started);
+	/* m23: stable wired-peer hints may trigger the opt-in auto-join */
+	if (disc)
+		om_disc_set_hint_cb(disc, om_autojoin_cb, u);
 
 	u->ctx = ubus_connect(NULL);
 	if (!u->ctx)

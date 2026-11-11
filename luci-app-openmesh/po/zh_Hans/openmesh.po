@@ -558,3 +558,24 @@ msgstr "应用失败"
 
 msgid "User-protected port"
 msgstr "用户保护口（禁止改动）"
+
+msgid "Auto mode"
+msgstr "自动模式"
+
+msgid "Auto mode enabled"
+msgstr "自动模式已开启：检测到已领养 mesh 对端且网口安全时自动接入"
+
+msgid "Auto mode disabled"
+msgstr "自动模式已关闭"
+
+msgid "Mesh peer"
+msgstr "检测到 mesh 对端"
+
+msgid "Mesh peer detected"
+msgstr "检测到 mesh 对端"
+
+msgid "stable"
+msgstr "信号稳定"
+
+msgid "detecting"
+msgstr "识别中"

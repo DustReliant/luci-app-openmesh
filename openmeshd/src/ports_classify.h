@@ -70,4 +70,14 @@ const char *om_port_mgmt_str(int mgmt);
  */
 int om_port_apply_gate(const struct om_port_verdict *v, bool ack_unknown);
 
+/*
+ * m23 auto-detection gate: the auto-join engine may act ONLY when every
+ * condition holds. Strictly stricter than the manual path -- a
+ * mgmt_unknown port (eligible=false) is NEVER auto-joined; the user
+ * must acknowledge that risk personally. Protected/WAN/etc. are
+ * ineligible by verdict and thus blocked here too.
+ */
+bool om_autojoin_should(const struct om_port_verdict *v, bool auto_enabled,
+			bool txn_active, bool has_mesh, bool hint_stable);
+
 #endif

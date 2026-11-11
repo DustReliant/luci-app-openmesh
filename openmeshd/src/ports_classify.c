@@ -40,6 +40,13 @@ int om_port_apply_gate(const struct om_port_verdict *v, bool ack_unknown)
 	return OM_APPLY_ALLOW;
 }
 
+bool om_autojoin_should(const struct om_port_verdict *v, bool auto_enabled,
+			bool txn_active, bool has_mesh, bool hint_stable)
+{
+	return auto_enabled && hint_stable && has_mesh && !txn_active &&
+	       v && v->eligible;
+}
+
 void om_port_classify(const struct om_port_facts *f,
 		      struct om_port_verdict *v)
 {

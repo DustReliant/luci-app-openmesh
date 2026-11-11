@@ -278,6 +278,22 @@ int main(void)
 		CHECK(om_port_apply_gate(&pv, false) == OM_APPLY_DENY);
 	}
 
+	/* ---- m23 auto-join gate ---- */
+	{
+		struct om_port_verdict ok = { .eligible = true };
+		struct om_port_verdict mu = { .eligible = false, .reason = "mgmt_unknown" };
+
+		CHECK(om_autojoin_should(&ok, true, false, true, true));
+		/* every condition is required */
+		CHECK(!om_autojoin_should(&ok, false, false, true, true));
+		CHECK(!om_autojoin_should(&ok, true, true, true, true));
+		CHECK(!om_autojoin_should(&ok, true, false, false, true));
+		CHECK(!om_autojoin_should(&ok, true, false, true, false));
+		CHECK(!om_autojoin_should(NULL, true, false, true, true));
+		/* mgmt_unknown is manual-only: the auto engine NEVER acks */
+		CHECK(!om_autojoin_should(&mu, true, false, true, true));
+	}
+
 	printf("test_ports_classify: %d PASS, %d FAIL\n", pass, fail);
 	return fail ? 1 : 0;
 }

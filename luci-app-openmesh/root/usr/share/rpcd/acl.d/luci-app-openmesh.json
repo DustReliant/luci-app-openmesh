@@ -10,7 +10,8 @@
 		"write": {
 			"ubus": {
 				"openmesh": [ "adopt", "revoke", "mesh_create", "mesh_join", "apply_confirm", "apply_rollback", "roaming_apply", "port_apply" ]
-			}
+			},
+			"uci": [ "openmesh" ]
 		}
 	}
 }

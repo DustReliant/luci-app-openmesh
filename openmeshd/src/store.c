@@ -84,6 +84,59 @@ int om_store_adopted(const uint8_t id[32], const uint8_t pk[32],
 static struct uci_section *find_by_id(struct uci_context *c,
 				      struct uci_package *p,
 				      const uint8_t id[32], char *name_out,
+				      size_t name_sz);
+
+static struct om_stored_node *fill_stored(struct uci_context *c,
+					  struct uci_section *s,
+					  struct om_stored_node *out)
+{
+	struct uci_option *o;
+
+	memset(out, 0, sizeof(*out));
+	o = uci_lookup_option(c, s, "id");
+	if (o && o->type == UCI_TYPE_STRING && o->v.string) {
+		uint8_t idbin[OM_ID_LEN];
+
+		if (om_id_from_hex(o->v.string, idbin) == 0)
+			memcpy(out->id, idbin, OM_ID_LEN);
+	}
+	o = uci_lookup_option(c, s, "key");
+	if (o && o->type == UCI_TYPE_STRING && o->v.string) {
+		uint8_t pkbin[OM_PK_LEN];
+
+		if (om_id_from_hex(o->v.string, pkbin) == 0)
+			memcpy(out->pk, pkbin, OM_PK_LEN);
+	}
+	o = uci_lookup_option(c, s, "name");
+	if (o && o->type == UCI_TYPE_STRING && o->v.string)
+		snprintf(out->name, sizeof(out->name), "%s", o->v.string);
+	return out;
+}
+
+int om_store_adopted_find(const uint8_t id[32], struct om_stored_node *out)
+{
+	struct uci_context *c = ctx_open();
+	struct uci_package *p = NULL;
+	struct uci_section *s;
+	char secname[128];
+	int rc = -1;
+
+	if (!c)
+		return -1;
+	if (uci_load(c, OM_UCI_PKG, &p) == UCI_OK) {
+		s = find_by_id(c, p, id, secname, sizeof(secname));
+		if (s) {
+			fill_stored(c, s, out);
+			rc = 0;
+		}
+	}
+	ctx_close(c);
+	return rc;
+}
+
+static struct uci_section *find_by_id(struct uci_context *c,
+				      struct uci_package *p,
+				      const uint8_t id[32], char *name_out,
 				      size_t name_sz)
 {
 	struct uci_element *e;
@@ -393,6 +446,35 @@ void om_store_backhaul_mode(char *mode, size_t mode_sz)
 		}
 	}
 	uci_free_context(c);
+}
+
+bool om_store_wired_auto(void)
+{
+	struct uci_context *c = uci_alloc_context();
+	struct uci_package *p = NULL;
+	struct uci_section *s = NULL;
+	struct uci_element *e;
+	struct uci_option *o;
+	bool on = false;
+
+	if (!c)
+		return false;
+	if (uci_load(c, OM_UCI_PKG, &p) == UCI_OK) {
+		uci_foreach_element(&p->sections, e) {
+			if (!strcmp(uci_to_section(e)->type, "openmesh")) {
+				s = uci_to_section(e);
+				break;
+			}
+		}
+		if (s) {
+			o = uci_lookup_option(c, s, "wired_auto");
+			if (o && o->type == UCI_TYPE_STRING &&
+			    !strcmp(o->v.string, "1"))
+				on = true;
+		}
+	}
+	uci_free_context(c);
+	return on;
 }
 
 int om_store_protected_ports(char out[][OM_PORT_LEN], int max)

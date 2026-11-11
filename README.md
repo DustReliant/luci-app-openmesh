@@ -31,6 +31,7 @@
 - ✅ 物理网口发现与有线回程预览（Phase 7.1：ubus ports/port_plan 只读发现+预检+配置预览，管理路径/WAN/DSA CPU 口/VLAN 风险识别，零网络改动）
 - ✅ 有线回程写路径（Phase 7.2：port_apply 服务端重验门禁+唯一可确认风险 mgmt_unknown+复用 30s 事务与代理推送）
 - ✅ 用户保护口（openmesh.main.protected_ports：NAS 等关键上联口在后端被绝对拒绝，任何确认不可翻越）
+- ✅ LAN 口自动识别（Phase 6.4：announce ingress 归属检测网线对端 mesh 设备，向导提示；自动模式 opt-in，仅严格 eligible 口自动接入，30s 事务兜底）
 - ✅ 事务安全加固（Phase 7.2 二片：确认/回滚绑定事务 generation；apply 失败即恢复快照；uci staging 残留清理；purge 清 bridge ports；回滚后 backhaul 意图自动同步）
 - ✅ 布局持久化（localStorage，按控制器 node_id 网络隔离）
 - ✅ 5 秒实时刷新（新节点自动加入，已有节点位置不变）
@@ -188,5 +189,6 @@ GPL-3.0-or-later（依赖 libsodium 为 ISC、libubox/libubus 为 LGPL-2.1）
 | [m20-topology-status.md](docs/design/m20-topology-status.md) | 拓扑状态可视化与交互完善（四态/质量分级/采集解耦/事件/短时趋势） |
 | [m21-eth-port-discovery.md](docs/design/m21-eth-port-discovery.md) | 物理网口发现与有线回程预览（Phase 7.0/7.1 + 7.2 建议） |
 | [m22-eth-port-apply.md](docs/design/m22-eth-port-apply.md) | 有线回程写路径 port_apply（Phase 7.2 第一片） |
+| [m23-wired-autojoin.md](docs/design/m23-wired-autojoin.md) | LAN 口自动识别与自动接入（提示+opt-in 自动模式） |
 | [scripts/openwrt-patches/](scripts/openwrt-patches/) | rtl8188ee 驱动补丁 + 自编译指南 |
 | [ADR 列表](docs/decisions/) | 架构决策记录（8 篇） |

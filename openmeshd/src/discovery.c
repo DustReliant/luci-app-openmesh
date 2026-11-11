@@ -13,10 +13,13 @@
  */
 
 #define _POSIX_C_SOURCE 200809L
+#define _DEFAULT_SOURCE		/* in_pktinfo / IP_PKTINFO */
 
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <net/if.h>
+#include <netinet/ip.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -246,6 +249,10 @@ int om_disc_init(struct om_disc *d, const struct om_disc_cfg *cfg,
 		return -1;
 	if (setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &on, sizeof(on)) < 0)
 		goto fail;
+	/* m23: per-packet ingress info so a wired peer's announce can be
+	 * attributed to the physical port it arrived on */
+	if (setsockopt(fd, IPPROTO_IP, IP_PKTINFO, &on, sizeof(on)) < 0)
+		goto fail;
 	if (fcntl(fd, F_SETFL, O_NONBLOCK) < 0)
 		goto fail;
 
@@ -289,24 +296,128 @@ int om_disc_send(struct om_disc *d)
 		      sizeof(dst)) == (ssize_t)n ? 0 : -1;
 }
 
+/* ---- ingress hints (m23) ---- */
+
+/* only physical-looking port names carry a hint: mesh/batman/bridge and
+ * virtual ingresses are the mesh itself, not a cable candidate */
+static bool hint_port_ok(const char *n)
+{
+	static const char *pfx[] = { "lo", "om_", "br-", "bat", "phy", "tun",
+				     "tap", "gre", "pppoe", "wg", "ifb",
+				     "veth", "mon." };
+	size_t i, len = strlen(n);
+
+	if (len == 0 || len > 15)
+		return false;
+	if (strchr(n, '.'))
+		return false;	/* vlan subinterface */
+	for (i = 0; i < sizeof(pfx) / sizeof(pfx[0]); i++)
+		if (!strncmp(n, pfx[i], strlen(pfx[i])))
+			return false;
+	return true;
+}
+
+void om_disc_note_ingress(struct om_disc *d, const char *ifname,
+			  const uint8_t node[OM_ID_LEN], time_t now)
+{
+	struct om_disc_hint *h = NULL;
+	unsigned i;
+
+	if (!hint_port_ok(ifname))
+		return;
+	for (i = 0; i < d->n_hints; i++)
+		if (!strcmp(d->hints[i].ifname, ifname)) {
+			h = &d->hints[i];
+			break;
+		}
+	if (!h) {
+		if (d->n_hints < OM_HINT_MAX) {
+			h = &d->hints[d->n_hints++];
+		} else {
+			/* evict the stalest row */
+			h = &d->hints[0];
+			for (i = 1; i < d->n_hints; i++)
+				if (d->hints[i].last_seen < h->last_seen)
+					h = &d->hints[i];
+		}
+		memset(h, 0, sizeof(*h));
+		snprintf(h->ifname, sizeof(h->ifname), "%s", ifname);
+		h->first_seen = now;
+	}
+	/* a different peer on the same cable restarts stability counting */
+	if (h->count && memcmp(h->node, node, OM_ID_LEN) != 0) {
+		memset(h, 0, sizeof(*h));
+		snprintf(h->ifname, sizeof(h->ifname), "%s", ifname);
+		h->first_seen = now;
+	}
+	memcpy(h->node, node, OM_ID_LEN);
+	h->last_seen = now;
+	h->count++;
+	/* fire exactly once per stability crossing */
+	if (d->hint_cb && h->count == OM_HINT_STABLE)
+		d->hint_cb(h, d->priv);
+}
+
+int om_disc_get_hints(const struct om_disc *d, struct om_disc_hint out[],
+		      int max)
+{
+	int n = 0;
+	unsigned i;
+
+	for (i = 0; i < d->n_hints && n < max; i++)
+		out[n++] = d->hints[i];
+	return n;
+}
+
+void om_disc_set_hint_cb(struct om_disc *d,
+			 void (*cb)(const struct om_disc_hint *h,
+				    void *priv),
+			 void *priv)
+{
+	d->hint_cb = cb;
+	d->priv = priv;
+}
+
 void om_disc_recv_ready(struct om_disc *d)
 {
 	uint8_t buf[OM_PKT_MAX];
 	struct sockaddr_in from;
-	socklen_t flen;
 	char addr[48];
 
 	for (;;) {
+		struct iovec iov = { buf, sizeof(buf) };
+		struct msghdr msg;
+		struct cmsghdr *cmsg;
+		char cbuf[CMSG_SPACE(sizeof(struct in_pktinfo))];
+		char ifname[IF_NAMESIZE] = "";
 		ssize_t r;
 
-		flen = sizeof(from);
-		r = recvfrom(d->fd, buf, sizeof(buf), 0,
-			     (struct sockaddr *)&from, &flen);
+		memset(&msg, 0, sizeof(msg));
+		msg.msg_iov = &iov;
+		msg.msg_iovlen = 1;
+		msg.msg_name = &from;
+		msg.msg_namelen = sizeof(from);
+		msg.msg_control = cbuf;
+		msg.msg_controllen = sizeof(cbuf);
+		r = recvmsg(d->fd, &msg, 0);
 		if (r < 0)
 			break;	/* EAGAIN / EINTR: nothing more */
 		if (!inet_ntop(AF_INET, &from.sin_addr, addr, sizeof(addr)))
 			continue;
-		om_disc_handle_packet(d, buf, (size_t)r, addr, time(NULL));
+		for (cmsg = CMSG_FIRSTHDR(&msg); cmsg;
+		     cmsg = CMSG_NXTHDR(&msg, cmsg))
+			if (cmsg->cmsg_level == IPPROTO_IP &&
+			    cmsg->cmsg_type == IP_PKTINFO) {
+				struct in_pktinfo *pi =
+					(struct in_pktinfo *)CMSG_DATA(cmsg);
+
+				if (!if_indextoname(pi->ipi_ifindex, ifname))
+					ifname[0] = '\0';
+			}
+		if (om_disc_handle_packet(d, buf, (size_t)r, addr,
+					  time(NULL)) == 0 && ifname[0])
+			om_disc_note_ingress(d, ifname, buf + 37,
+					     time(NULL));
 	}
 }
 

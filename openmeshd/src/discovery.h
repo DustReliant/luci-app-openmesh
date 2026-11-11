@@ -16,6 +16,10 @@
 #define OM_NONCE_RING  8
 #define OM_TS_WINDOW   90	/* seconds */
 
+/* ---- wired-peer ingress hints (m23 auto-detection) ---- */
+#define OM_HINT_MAX    8	/* one row per physical port, evict oldest */
+#define OM_HINT_STABLE 2	/* announcements before a hint counts */
+
 /* magic(4) + ver(1) + ts(8) + nonce(24) + id(32) + pk(32) */
 #define OM_HDR_LEN     101
 #define OM_SIG_LEN     64
@@ -46,13 +50,27 @@ struct om_disc_cfg {
 	char mac[18];		/* primary MAC, "" to omit */
 };
 
+/* last verified announce per PHYSICAL ingress port (m23): a peer whose
+ * signed announce enters via a br-lan member port is sitting on the
+ * other end of that cable */
+struct om_disc_hint {
+	char ifname[16];
+	uint8_t node[OM_ID_LEN];
+	time_t first_seen;
+	time_t last_seen;
+	uint32_t count;
+};
+
 struct om_disc {
 	int fd;
 	struct om_disc_cfg cfg;
 	const struct om_identity *id;
 	struct om_node_info nodes[OM_DISC_MAX_NODES];
 	unsigned n_nodes;
+	struct om_disc_hint hints[OM_HINT_MAX];
+	unsigned n_hints;
 	void (*on_new)(struct om_disc *d, const struct om_node_info *n, void *priv);
+	void (*hint_cb)(const struct om_disc_hint *h, void *priv);
 	void *priv;
 };
 
@@ -92,5 +110,20 @@ int om_json_get_str(const char *body, size_t len, const char *key,
  */
 int om_disc_handle_packet(struct om_disc *d, const uint8_t *buf, size_t len,
 			  const char *src, time_t now);
+
+/* ---- ingress hints (m23) ----
+ * Record a verified announce seen on a physical ingress port; fires
+ * hint_cb exactly when the hint first reaches OM_HINT_STABLE count. */
+void om_disc_note_ingress(struct om_disc *d, const char *ifname,
+			  const uint8_t node[OM_ID_LEN], time_t now);
+
+/* copy hints out (max entries); returns number stored */
+int om_disc_get_hints(const struct om_disc *d, struct om_disc_hint out[],
+		      int max);
+
+void om_disc_set_hint_cb(struct om_disc *d,
+			 void (*cb)(const struct om_disc_hint *h,
+				    void *priv),
+			 void *priv);
 
 #endif /* OPENMESH_DISCOVERY_H */

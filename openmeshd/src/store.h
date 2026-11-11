@@ -22,6 +22,9 @@ int om_store_adopted(const uint8_t id[32], const uint8_t pk[32],
 /* Rename an adopted node (matched by id). Returns 0 / -1. */
 int om_store_rename(const uint8_t id[32], const char *name);
 
+/* Find one adopted node by id (m23 hint labels). 0 found / -1. */
+int om_store_adopted_find(const uint8_t id[32], struct om_stored_node *out);
+
 /* Remove an adopted node (matched by id). Returns 0 / -1. */
 int om_store_remove(const uint8_t id[32]);
 
@@ -58,6 +61,9 @@ void om_store_sync_backhaul_ports(void);
  * categorically -- this is a policy fact, not a UI hint. Returns count.
  */
 int om_store_protected_ports(char out[][OM_PORT_LEN], int max);
+
+/* m23 auto-detection opt-in (openmesh.main.wired_auto == '1') */
+bool om_store_wired_auto(void);
 
 /* Current br-lan bridge member ports (om_* virtual members excluded),
  * read from the network device section named br-lan. Fills out (each

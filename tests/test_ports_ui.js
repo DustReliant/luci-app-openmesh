@@ -296,6 +296,40 @@ test('P22: backend rejects mismatched generation (source contract)', function() 
 		'agent confirm passes no foreign gen');
 });
 
+/* ---- m23: wired-peer auto-detection ---- */
+
+test('P23: peer hint lands in the option label', function() {
+	assert.strictEqual(
+		portOptionLabel({ device: 'lan2', eligible: true, mesh_peer: 'x86' }),
+		'lan2 · Mesh peer detected');
+	/* risk annotations still outrank the peer hint */
+	assert.strictEqual(
+		portOptionLabel({ device: 'lan1', eligible: false,
+			reason: 'mgmt', management: 'yes' }),
+		'lan1 — Management path');
+});
+
+test('P24: auto mode is opt-in and persisted via UCI', function() {
+	assert.ok(code.includes("'require uci'"), 'uci module loaded');
+	assert.ok(/uci\.set\('openmesh',\s*'main',\s*'wired_auto'/.test(code),
+		'toggle writes openmesh.main.wired_auto');
+	assert.ok(code.includes("uci.get('openmesh', 'main', 'wired_auto')"),
+		'state restored from UCI');
+});
+
+test('P25: auto engine is strictly manual-minus-risk (source contract)', function() {
+	const pc = fs.readFileSync(path.join(__dirname, '..', 'openmeshd', 'src', 'ports_classify.c'), 'utf8');
+	assert.ok(pc.includes('om_autojoin_should') &&
+		pc.includes('v->eligible'),
+		'auto gate requires strict eligibility');
+	const ubusC = fs.readFileSync(path.join(__dirname, '..', 'openmeshd', 'src', 'ubus_api.c'), 'utf8');
+	assert.ok(ubusC.includes('om_autojoin_should(&hit->v, true'),
+		'engine re-classifies the port fresh');
+	assert.ok(ubusC.includes('om_store_wired_auto()'),
+		'engine honours the opt-in switch');
+	assert.ok(ubusC.includes('"mesh_peer"'), 'ports API carries the hint');
+});
+
 console.log(results.join('\n'));
 console.log(`\ntest_ports_ui: ${pass} PASS, ${fail} FAIL`);
 process.exit(fail > 0 ? 1 : 0);

@@ -4,6 +4,7 @@
 'require view';
 'require rpc';
 'require ui';
+'require uci';
 
 var callMeshCreate = rpc.declare({ object: 'openmesh', method: 'mesh_create',
 				   params: [ 'mesh_name', 'band', 'key', 'mode', 'lan_ports' ] });
@@ -74,6 +75,7 @@ function portOptionLabel(p) {
 	if (!p || !p.device) return '';
 	if (p.management === 'yes') return p.device + ' — ' + _('Management path');
 	if (!p.eligible) return p.device + ' — ' + riskText(p.reason);
+	if (p.mesh_peer) return p.device + ' · ' + _('Mesh peer detected');
 	return p.device;
 }
 
@@ -92,7 +94,8 @@ return view.extend({
 	load: function() {
 		return Promise.all([
 			L.resolveDefault(callLanPorts(), { ports: [] }),
-			L.resolveDefault(callPorts(), { ports: [] })
+			L.resolveDefault(callPorts(), { ports: [] }),
+			uci.load('openmesh')
 		]).then(function(r) {
 			return { lanPorts: r[0], ports: r[1].ports || [] };
 		}, function() {
@@ -103,6 +106,7 @@ return view.extend({
 	render: function(data) {
 		var nameInput, bandSel, modeSel, keyInput, lanPortsSel, statusLine;
 		var wiredEnable, wiredMode, wiredPort, wiredInfo, wiredPlan;
+		var wiredAuto, autoHint;
 		var applyBtn, applyResult, lastPlan = null;
 		var portList = data.ports || [];
 		/* m22-2: confirm/rollback are bound to the transaction they
@@ -252,6 +256,11 @@ return view.extend({
 				p.eligible ? '#4CAF50' : '#F44336');
 			if (!p.eligible)
 				infoRow(wiredInfo, _('Reason'), riskText(p.reason), '#F44336');
+			if (p.mesh_peer)
+				infoRow(wiredInfo, _('Mesh peer'),
+					p.mesh_peer + ' · ' +
+					(p.mesh_peer_stable ? _('stable') :
+					 _('detecting')), '#4CAF50');
 		}
 
 		function planList(box, title, items) {
@@ -421,6 +430,29 @@ return view.extend({
 			]),
 			E('div', { 'class': 'cbi-value' }, [
 				E('label', { 'class': 'cbi-value-title' },
+				  _('Auto mode')),
+				E('div', { 'class': 'cbi-value-field' }, [
+					wiredAuto = E('input', {
+						'type': 'checkbox',
+						'change': function() {
+							uci.set('openmesh', 'main',
+								'wired_auto',
+								this.checked ? '1' : '0');
+							uci.save().then(function() {
+								autoHint.textContent =
+									wiredAuto.checked ?
+									_('Auto mode enabled') :
+									_('Auto mode disabled');
+							});
+						}
+					}),
+					' ',
+					autoHint = E('span', { 'style':
+						'font-size:12px;color:#999' }, '')
+				])
+			]),
+			E('div', { 'class': 'cbi-value' }, [
+				E('label', { 'class': 'cbi-value-title' },
 				  _('Backhaul mode (intent)')),
 				E('div', { 'class': 'cbi-value-field' },
 					wiredMode = E('select', {
@@ -493,6 +525,8 @@ return view.extend({
 		]);
 		wiredInfo.style.display = 'none';
 		renderPortInfo();
+		wiredAuto.checked =
+			uci.get('openmesh', 'main', 'wired_auto') === '1';
 
 		return E('div', {}, [
 			E('h3', {}, _('Create mesh network')),
