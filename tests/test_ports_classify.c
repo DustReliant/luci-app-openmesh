@@ -240,7 +240,7 @@ int main(void)
 	{
 		const char *toks[] = { "mgmt", "wan", "vlan", "mesh", "dsa_cpu",
 				       "pppoe", "virtual", "wireless", "master",
-				       "not_exist" };
+				       "not_exist", "protected" };
 		size_t i;
 
 		for (i = 0; i < sizeof(toks) / sizeof(toks[0]); i++) {
@@ -250,6 +250,32 @@ int main(void)
 			if (strcmp(toks[i], "mgmt_unknown"))
 				CHECK(om_port_apply_gate(&v, true) == OM_APPLY_DENY);
 		}
+	}
+
+	/* ---- user-protected ports (m22-2 addendum) ---- */
+	{
+		struct om_port_facts f = base_eth("lan2");
+
+		f.in_lan_bridge = true;
+		f.lan_carrier_count = 0;	/* otherwise fully eligible */
+		CHECK(v_of(&f).eligible);
+		f.user_protected = true;
+		struct om_port_verdict v = v_of(&f);
+
+		CHECK(!v.eligible && !strcmp(v.reason, "protected"));
+		CHECK(!strcmp(v.role, "lan"));
+		/* protection outranks everything, incl. the DSA cpu rule */
+		struct om_port_facts cpu = base_eth("eth0");
+
+		cpu.dsa_present = true;
+		cpu.user_protected = true;
+		CHECK(!strcmp(v_of(&cpu).reason, "protected"));
+		/* apply gate: acknowledgement changes nothing */
+		struct om_port_verdict pv = { .eligible = false };
+
+		snprintf(pv.reason, sizeof(pv.reason), "protected");
+		CHECK(om_port_apply_gate(&pv, true) == OM_APPLY_DENY);
+		CHECK(om_port_apply_gate(&pv, false) == OM_APPLY_DENY);
 	}
 
 	printf("test_ports_classify: %d PASS, %d FAIL\n", pass, fail);

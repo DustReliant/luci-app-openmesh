@@ -17,6 +17,7 @@
 
 #include "ports_classify.h"
 #include "ports.h"
+#include "store.h"
 
 #define NET_SYSFS "/sys/class/net"
 #define LAN_BRIDGE "br-lan"
@@ -241,8 +242,11 @@ int om_ports_discover(struct om_port_entry out[], int max)
 	bool dsa_present = false;
 	char names[OM_PORTS_MAX][16];
 	int n_names = 0;
+	char prot[8][OM_PORT_LEN];
+	int n_prot;
 
 	read_net_facts(&nf);
+	n_prot = om_store_protected_ports(prot, 8);
 
 	d = opendir(NET_SYSFS);
 	if (!d)
@@ -277,6 +281,7 @@ int om_ports_discover(struct om_port_entry out[], int max)
 	n = 0;
 	for (i = 0; i < n_names && n < max; i++) {
 		fill_facts(&out[n].f, names[i], &nf, dsa_present);
+		out[n].f.user_protected = list_has(prot, n_prot, names[i]);
 		n++;
 	}
 

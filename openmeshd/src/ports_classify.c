@@ -77,6 +77,13 @@ void om_port_classify(const struct om_port_facts *f,
 		return;
 	}
 
+	/* operator-forbidden ports are absolute: nothing overrides this */
+	if (f->user_protected) {
+		set_v(v, false, "protected", f->in_lan_bridge ? "lan" :
+							"unused", v->mgmt);
+		return;
+	}
+
 	/* on a DSA system a physical ethX without phys_port_name is the
 	 * switch CPU port: moving it kills the whole switch */
 	if (f->dsa_present && !f->dsa_user && !f->is_bridge) {

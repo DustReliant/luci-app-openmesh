@@ -44,6 +44,18 @@ grep -q "\"device\": *\"$PORT\"" /tmp/p.json ||
 	{ blk "S1 port $PORT not discovered"; exit 1; }
 ok "S1 $PORT discovered"
 
+step "S1.5 user-protected port guard"
+PROTECTED=$(uci -q get openmesh.main.protected_ports 2>/dev/null || true)
+case " $PROTECTED " in
+*" $PORT "*)
+	blk "S1.5 $PORT is user-protected (protected_ports) -- refusing"
+	exit 1
+	;;
+esac
+grep -q "\"device\": *\"$PORT\",[^}]*\"reason\": *\"protected\"" /tmp/p.json &&
+	{ blk "S1.5 backend marks $PORT protected -- refusing"; exit 1; } ||
+	ok "S1.5 $PORT not protected"
+
 step "S2 port_plan verdict (§五.2-3)"
 ubus call openmesh port_plan "{\"device\":\"$PORT\"}" > /tmp/pp.json
 grep -q '"ok": *true' /tmp/pp.json ||

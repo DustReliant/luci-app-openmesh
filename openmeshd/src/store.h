@@ -5,6 +5,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* max port-name length incl. NUL (shared by all port-array helpers) */
+#define OM_PORT_LEN 16
+
 /* Persisted adopted-node record (UCI "config node" sections). */
 struct om_stored_node {
 	uint8_t id[32];
@@ -48,12 +51,19 @@ void om_store_backhaul_mode(char *mode, size_t mode_sz);
  */
 void om_store_sync_backhaul_ports(void);
 
+/*
+ * User-protected ports (openmesh.main list "protected_ports"): physical
+ * ports the operator has forbidden from ever joining the wired backhaul
+ * (e.g. the NAS uplink on the controller). The backend refuses them
+ * categorically -- this is a policy fact, not a UI hint. Returns count.
+ */
+int om_store_protected_ports(char out[][OM_PORT_LEN], int max);
+
 /* Current br-lan bridge member ports (om_* virtual members excluded),
  * read from the network device section named br-lan. Fills out (each
  * OM_PORT_LEN bytes), returns the number of entries found (may exceed
  * max; only max are stored). Dynamic per workflow §7: no hardcoded
  * port names anywhere. */
-#define OM_PORT_LEN 16
 int om_store_lan_ports(char out[][OM_PORT_LEN], int max);
 
 #endif /* OPENMESH_STORE_H */

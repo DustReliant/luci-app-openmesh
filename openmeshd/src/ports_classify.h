@@ -26,6 +26,7 @@ struct om_port_facts {
 	bool pppoe;		/* pppoe proto rides on it */
 	bool vlan_dep;		/* vlan subif or vlan section references it */
 	bool om_mesh_port;	/* om_eth_* section or enslaved to om_bat */
+	bool user_protected;	/* operator-forbidden (UCI protected_ports) */
 	int lan_carrier_count;	/* physical br-lan members with carrier now */
 };
 

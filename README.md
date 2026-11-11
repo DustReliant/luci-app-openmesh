@@ -30,6 +30,7 @@
 - ✅ 链路短时趋势（≈3 分钟有界采样，缺口断线呈现，非长期历史）
 - ✅ 物理网口发现与有线回程预览（Phase 7.1：ubus ports/port_plan 只读发现+预检+配置预览，管理路径/WAN/DSA CPU 口/VLAN 风险识别，零网络改动）
 - ✅ 有线回程写路径（Phase 7.2：port_apply 服务端重验门禁+唯一可确认风险 mgmt_unknown+复用 30s 事务与代理推送）
+- ✅ 用户保护口（openmesh.main.protected_ports：NAS 等关键上联口在后端被绝对拒绝，任何确认不可翻越）
 - ✅ 事务安全加固（Phase 7.2 二片：确认/回滚绑定事务 generation；apply 失败即恢复快照；uci staging 残留清理；purge 清 bridge ports；回滚后 backhaul 意图自动同步）
 - ✅ 布局持久化（localStorage，按控制器 node_id 网络隔离）
 - ✅ 5 秒实时刷新（新节点自动加入，已有节点位置不变）

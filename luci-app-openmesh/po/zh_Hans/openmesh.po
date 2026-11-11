@@ -555,3 +555,6 @@ msgstr "请先创建 Mesh 网络"
 
 msgid "Apply failed"
 msgstr "应用失败"
+
+msgid "User-protected port"
+msgstr "用户保护口（禁止改动）"

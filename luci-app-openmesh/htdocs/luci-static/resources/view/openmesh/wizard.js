@@ -54,7 +54,8 @@ function riskText(tok) {
 		pppoe: 'PPPoE',
 		virtual: _('Virtual device'),
 		wireless: _('Wireless device'),
-		master: _('Enslaved')
+		master: _('Enslaved'),
+		protected: _('User-protected port')
 	};
 	return m[tok] || _('Unknown');
 }

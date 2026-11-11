@@ -395,6 +395,43 @@ void om_store_backhaul_mode(char *mode, size_t mode_sz)
 	uci_free_context(c);
 }
 
+int om_store_protected_ports(char out[][OM_PORT_LEN], int max)
+{
+	struct uci_context *c = uci_alloc_context();
+	struct uci_package *p = NULL;
+	struct uci_section *s = NULL;
+	struct uci_element *e, *pe;
+	struct uci_option *o;
+	int n = 0;
+
+	if (!c)
+		return 0;
+	if (uci_load(c, OM_UCI_PKG, &p) == UCI_OK) {
+		uci_foreach_element(&p->sections, e) {
+			if (!strcmp(uci_to_section(e)->type, "openmesh")) {
+				s = uci_to_section(e);
+				break;
+			}
+		}
+		if (s) {
+			o = uci_lookup_option(c, s, "protected_ports");
+			if (o && o->type == UCI_TYPE_LIST) {
+				uci_foreach_element(&o->v.list, pe) {
+					if (!om_port_name_valid(pe->name,
+								strlen(pe->name)))
+						continue;
+					if (n < max)
+						snprintf(out[n], OM_PORT_LEN,
+							 "%s", pe->name);
+					n++;
+				}
+			}
+		}
+	}
+	uci_free_context(c);
+	return n;
+}
+
 void om_store_sync_backhaul_ports(void)
 {
 	struct uci_context *c = uci_alloc_context();
