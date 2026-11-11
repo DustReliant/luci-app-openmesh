@@ -45,6 +45,18 @@ for S in $(uci -q show network 2>/dev/null |
 	uci -q delete network.$S
 done
 
+# operator-forbidden ports (openmesh.main.protected_ports): enforced
+# HERE because every path into the wired leg funnels through this
+# script -- a protected port (e.g. the NAS uplink) is never touched,
+# neither when named explicitly nor inside an "all" expansion.
+PROT=$(uci -q get openmesh.main.protected_ports 2>/dev/null)
+is_protected() {
+	case " $PROT " in
+	*" $1 "*) return 0 ;;
+	esac
+	return 1
+}
+
 # resolve the wired-leg selection
 SEL=""
 if [ "${OM_LAN_PORTS:-}" = "all" ]; then
@@ -57,6 +69,7 @@ for P in $SEL; do
 	om_*|br-*|lo) continue ;;
 	esac
 	[ -d "$NET_SYS/$P" ] || continue
+	is_protected "$P" && continue
 	uci -q del_list network.$BR.ports="$P"
 	uci -q set network.om_eth_$P=interface
 	uci -q set network.om_eth_$P.proto='batadv_hardif'

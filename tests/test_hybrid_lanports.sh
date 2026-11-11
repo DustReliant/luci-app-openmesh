@@ -63,6 +63,16 @@ CUR="$STATE"
 while [ "${1#-}" != "$1" ]; do shift; done
 cmd="$1"
 path="${2:-}"
+PKG=network
+case "$path" in
+openmesh.*)
+	PKG=openmesh
+	path="${path#openmesh.}"
+	;;
+network.*)
+	path="${path#network.}"
+	;;
+esac
 sec="${path#network.}"
 opt=""
 val=""
@@ -97,6 +107,16 @@ show)
 	}' "$CUR"
 	;;
 get)
+	# openmesh package is served from a one-port-per-line side file
+	# (list values print space-separated, like real uci get)
+	if [ "$PKG" = openmesh ]; then
+		if [ -f "${UCI_OM_STATE:-/nonexistent}" ]; then
+			tr '\n' ' ' < "$UCI_OM_STATE"
+			echo
+			exit 0
+		fi
+		exit 1
+	fi
 	awk -F'|' -v sec="$sec" -v opt="$opt" '
 	$1 == "network" && $2 == sec && $3 == opt {
 		line = ""
@@ -184,8 +204,9 @@ run() {
 	(
 		PATH="$T/fakebin:$PATH"
 		UCI_STATE="$T/state"
+		UCI_OM_STATE="$T/omstate"
 		OM_NET_SYS="$T/net"
-		export PATH UCI_STATE OM_NET_SYS
+		export PATH UCI_STATE UCI_OM_STATE OM_NET_SYS
 		if [ -n "$1" ]; then
 			OM_LAN_PORTS="$1"
 			export OM_LAN_PORTS
@@ -277,8 +298,9 @@ run_env() {  # run_env <lan_ports> <uci_fail_on|-> : run with uci fault hook
 	(
 		PATH="$T/fakebin:$PATH"
 		UCI_STATE="$T/state"
+		UCI_OM_STATE="$T/omstate"
 		OM_NET_SYS="$T/net"
-		export PATH UCI_STATE OM_NET_SYS
+		export PATH UCI_STATE UCI_OM_STATE OM_NET_SYS
 		[ -n "${2:-}" ] && { UCI_FAIL_ON="$2"; export UCI_FAIL_ON; }
 		if [ -n "${1:-}" ]; then
 			OM_LAN_PORTS="$1"
@@ -353,6 +375,32 @@ grep -q "om_store_sync_backhaul_ports" "$SRC" &&
 	ok "TX5 backhaul sync wired" || bad "TX5 backhaul sync wired"
 grep -q "om_netconf_recover" "$SRC" &&
 	ok "TX5 boot recovery present" || bad "TX5 boot recovery present"
+
+# ---- HP: user-protected ports at the orchestration choke point ----
+# every path into the wired leg funnels through hybrid-netconf.sh, so
+# the protection list is enforced there too (m19 mesh_create included)
+
+echo "== HP1: protected port named in the selection is skipped =="
+setup
+echo "lan1" > "$T/omstate"
+if run "lan1"; then ok "HP1 rc"; else bad "HP1 rc"; fi
+lacks 'network|om_eth_lan1|' && ok "HP1 protected port untouched" || bad "HP1 protected port touched"
+ports_eq 'lan1|lan2|lan3|om_bat' && ok "HP1 protected port stays in bridge" || bad "HP1 protected port stays in bridge"
+
+echo "== HP2: 'all' expansion excludes protected ports =="
+setup
+echo "lan2" > "$T/omstate"
+if run "all"; then ok "HP2 rc"; else bad "HP2 rc"; fi
+lacks 'network|om_eth_lan2|' && ok "HP2 protected port untouched" || bad "HP2 protected port touched"
+ports_eq 'lan2|om_bat' && ok "HP2 only unprotected ports moved" || bad "HP2 only unprotected ports moved"
+has 'network|om_eth_lan1|' && has 'network|om_eth_lan3|' &&
+	ok "HP2 unprotected ports applied" || bad "HP2 unprotected ports applied"
+
+echo "== HP3: no protection list = legacy behaviour (H-series proves it) =="
+setup
+rm -f "$T/omstate"
+run "lan1" >/dev/null 2>&1
+has 'network|om_eth_lan1|' && ok "HP3 unlisted port works as before" || bad "HP3 unlisted port works as before"
 
 echo
 echo "test_hybrid_lanports: $pass PASS, $fail FAIL"

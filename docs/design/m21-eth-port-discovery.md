@@ -33,7 +33,7 @@
 - **分层**：`ports_classify.c` 纯函数（facts→verdict，宿主可测）∥ `ports.c` 发现层（sysfs+UCI 只读）∥ `ubus_api.c` 薄序列化。发现层不可宿主测试（libuci 依赖），已登记；分类逻辑 100% 被覆盖。
 - **DSA CPU 口识别**：系统存在任意 `phys_port_name` 网口（DSA 用户口）时，无该属性的裸 ethX 即交换机 CPU 口——移出会断整个交换机，blocked（`dsa_cpu`）。x86 无 DSA 标记 → ethX 为独立网卡，正常参与。
 - **管理路径证据链**（不靠名字）：br-lan 物理成员中**恰好一个**有 carrier → 它极可能是管理路径（`management:yes`，blocked）；多个有 carrier → 无法区分（`unknown`，blocked `mgmt_unknown`）；本口无 carrier → 必不是管理路径（`no`）。无 carrier ≠ 不可配置（将来可预配置）。
-- **阻塞顺序**（首个命中生效）：虚拟/无线/已 enslaved → **用户保护口（UCI `openmesh.main.protected_ports` 列表，绝对拒绝，任何确认不可翻越——业主设备如 NAS 上联口靠此保护）** → DSA CPU → 已用于 Mesh → WAN/PPPoE → VLAN 依赖 → 管理路径 yes/unknown → **eligible**。
+- **阻塞顺序**（首个命中生效）：虚拟/无线/已 enslaved → **用户保护口（UCI `openmesh.main.protected_ports` 列表，绝对拒绝，任何确认不可翻越——业主设备如 NAS 上联口靠此保护）** → DSA CPU → 已用于 Mesh → WAN/PPPoE → VLAN 依赖 → 管理路径 yes/unknown → **eligible**。保护口在**两处强制**：分类器（port_apply 路径）+ `hybrid-netconf.sh` 咽喉点（m19 mesh_create 路径，含 'all' 展开过滤）——所有通往有线腿的路径无死角。
 - **后端重复校验**：`port_plan` 每次调用重新枚举 sysfs+UCI 再分类——前端下拉的 eligible 只是显示提示，7.2 的任何写操作必须（并将）重新走此校验（任务 §五红线，测试 P12 固化）。
 - **预览非命令**：uci_changes/ops 全部为描述性文本（与 hybrid-netconf.sh 语义对齐），任何代码路径都不会把它们交给 shell。
 - **安全边界（§七）**：ports.c 零 system()、零写文件、零 reload——只有 opendir/stat/fopen(读)/libuci load。向导区只渲染。本阶段不持久化意图。
