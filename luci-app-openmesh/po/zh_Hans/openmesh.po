@@ -559,6 +559,9 @@ msgstr "应用失败"
 msgid "User-protected port"
 msgstr "用户保护口（禁止改动）"
 
+msgid "Switch trunk (carries all VLANs)"
+msgstr "交换机主干口（承载全部 VLAN，禁改）"
+
 msgid "Auto mode"
 msgstr "自动模式"
 

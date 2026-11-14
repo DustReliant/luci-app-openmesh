@@ -100,7 +100,7 @@ test('P6: unknown reason token falls back, never empty/undefined', function() {
 
 test('P7: every backend reason token has a label', function() {
 	['mgmt', 'mgmt_unknown', 'wan', 'vlan', 'mesh', 'dsa_cpu', 'pppoe',
-	 'virtual', 'wireless', 'master', 'protected'].forEach(tok => {
+	 'virtual', 'wireless', 'master', 'protected', 'vlan_parent'].forEach(tok => {
 		var t = riskText(tok);
 		assert.strictEqual(typeof t, 'string');
 		assert.ok(t.length > 0 && t !== 'Unknown', tok + ' has dedicated text');

@@ -65,9 +65,17 @@ void om_port_classify(const struct om_port_facts *f,
 	else
 		v->mgmt = OM_MGMT_NO;
 
-	/* virtual family: bridges, wifi ifaces, batman softifs, vlan
-	 * subinterfaces, enslaved devices -- shown but never selectable */
-	if (f->is_bridge || f->is_vlan_subif) {
+	/* operator-forbidden ports are absolute and shown first: nothing
+	 * outranks the user's own decree */
+	if (f->user_protected) {
+		set_v(v, false, "protected", f->in_lan_bridge ? "lan" :
+							"unused", v->mgmt);
+		return;
+	}
+
+	/* virtual family: bridges, wifi ifaces, batman softifs, enslaved
+	 * devices -- shown but never selectable */
+	if (f->is_bridge) {
 		set_v(v, false, "virtual", "virtual", v->mgmt);
 		return;
 	}
@@ -84,13 +92,6 @@ void om_port_classify(const struct om_port_facts *f,
 		return;
 	}
 
-	/* operator-forbidden ports are absolute: nothing overrides this */
-	if (f->user_protected) {
-		set_v(v, false, "protected", f->in_lan_bridge ? "lan" :
-							"unused", v->mgmt);
-		return;
-	}
-
 	/* on a DSA system a physical ethX without phys_port_name is the
 	 * switch CPU port: moving it kills the whole switch */
 	if (f->dsa_present && !f->dsa_user && !f->is_bridge) {
@@ -102,12 +103,23 @@ void om_port_classify(const struct om_port_facts *f,
 		set_v(v, false, "mesh", "mesh", v->mgmt);
 		return;
 	}
+	/* WAN beats the virtual look: "eth0.2" as wan shows the real risk */
 	if (f->is_wan) {
 		set_v(v, false, "wan", "wan", v->mgmt);
 		return;
 	}
 	if (f->pppoe) {
 		set_v(v, false, "pppoe", "wan", v->mgmt);
+		return;
+	}
+	/* swconfig trunk (eth0 with vlan children) carries every vlan:
+	 * moving it strands LAN and WAN at once */
+	if (f->is_vlan_parent) {
+		set_v(v, false, "vlan_parent", "virtual", v->mgmt);
+		return;
+	}
+	if (f->is_vlan_subif) {
+		set_v(v, false, "virtual", "virtual", v->mgmt);
 		return;
 	}
 	if (f->vlan_dep) {

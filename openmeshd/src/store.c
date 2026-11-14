@@ -499,8 +499,22 @@ int om_store_protected_ports(char out[][OM_PORT_LEN], int max)
 			o = uci_lookup_option(c, s, "protected_ports");
 			if (o && o->type == UCI_TYPE_LIST) {
 				uci_foreach_element(&o->v.list, pe) {
-					if (!om_port_name_valid(pe->name,
-								strlen(pe->name)))
+					size_t l = strlen(pe->name);
+					bool ok = l > 0 && l < OM_PORT_LEN;
+					/* display-only list (string compare,
+					 * never reaches a shell): interface
+					 * names incl. vlan dots are fine */
+					for (size_t k = 0; ok && k < l; k++) {
+						char ch = pe->name[k];
+
+						if (!((ch >= 'a' && ch <= 'z') ||
+						      (ch >= 'A' && ch <= 'Z') ||
+						      (ch >= '0' && ch <= '9') ||
+						      ch == '_' || ch == '.' ||
+						      ch == '-'))
+							ok = false;
+					}
+					if (!ok)
 						continue;
 					if (n < max)
 						snprintf(out[n], OM_PORT_LEN,

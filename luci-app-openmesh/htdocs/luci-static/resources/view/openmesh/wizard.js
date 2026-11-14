@@ -56,7 +56,8 @@ function riskText(tok) {
 		virtual: _('Virtual device'),
 		wireless: _('Wireless device'),
 		master: _('Enslaved'),
-		protected: _('User-protected port')
+		protected: _('User-protected port'),
+		vlan_parent: _('Switch trunk (carries all VLANs)')
 	};
 	return m[tok] || _('Unknown');
 }

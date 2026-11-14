@@ -294,6 +294,34 @@ int main(void)
 		CHECK(!om_autojoin_should(&mu, true, false, true, true));
 	}
 
+	/* ---- swconfig trunk / vlan parent (found on real 4A, m21 DoD) ---- */
+	{
+		struct om_port_facts trunk = base_eth("eth0");
+
+		/* WITHOUT the parent fact it looks eligible (the bug) */
+		CHECK(v_of(&trunk).eligible);
+		/* WITH vlan children present: absolute block, never ack-able */
+		trunk.is_vlan_parent = true;
+		struct om_port_verdict v = v_of(&trunk);
+
+		CHECK(!v.eligible && !strcmp(v.reason, "vlan_parent"));
+		struct om_port_verdict pv = { .eligible = false };
+
+		snprintf(pv.reason, sizeof(pv.reason), "vlan_parent");
+		CHECK(om_port_apply_gate(&pv, true) == OM_APPLY_DENY);
+	}
+	/* WAN beats the vlan look: "eth0.2" reports the real risk */
+	{
+		struct om_port_facts w = base_eth("eth0.2");
+
+		w.is_vlan_subif = true;
+		w.is_wan = true;
+		struct om_port_verdict v = v_of(&w);
+
+		CHECK(!v.eligible && !strcmp(v.reason, "wan"));
+		CHECK(!strcmp(v.role, "wan"));
+	}
+
 	printf("test_ports_classify: %d PASS, %d FAIL\n", pass, fail);
 	return fail ? 1 : 0;
 }

@@ -16,6 +16,8 @@ struct om_port_facts {
 	bool is_bridge;		/* bridge dir (br-lan, ...) */
 	bool is_batman_soft;	/* mesh dir (batX) */
 	bool is_vlan_subif;	/* "eth0.1" style name */
+	bool is_vlan_parent;	/* "eth0" with eth0.1/eth0.2 children: the
+				 * swconfig trunk carrying ALL traffic */
 	bool has_master;	/* enslaved: batman hardif / bond / team */
 	bool dsa_user;		/* phys_port_name present (DSA user port) */
 	bool dsa_present;	/* any DSA user port exists on the system */

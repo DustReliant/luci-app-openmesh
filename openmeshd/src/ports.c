@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <uci.h>
 
@@ -199,8 +200,27 @@ static void fill_facts(struct om_port_facts *f, const char *dev,
 	f->wireless = dev_has_dir(dev, "phy80211");
 	f->is_bridge = dev_has_dir(dev, "bridge");
 	f->is_batman_soft = dev_has_dir(dev, "mesh");
+	/* master symlink: bridge MEMBERS also carry one (points at the
+	 * bridge) -- only non-bridge enslavement (batman hardif, bond)
+	 * counts as "already used". Real-hardware lesson from the 4A. */
 	snprintf(path, sizeof(path), NET_SYSFS "/%s/master", dev);
-	f->has_master = path_exists(path);
+	if (path_exists(path)) {
+		char link[64];
+		ssize_t ll = readlink(path, link, sizeof(link) - 1);
+
+		if (ll > 0) {
+			char master[32];
+			const char *base;
+
+			link[ll] = '\0';
+			base = strrchr(link, '/');
+			base = base ? base + 1 : link;
+			snprintf(master, sizeof(master), "%s", base);
+			f->has_master = !dev_has_dir(master, "bridge");
+		} else {
+			f->has_master = true;
+		}
+	}
 	snprintf(path, sizeof(path), NET_SYSFS "/%s/phys_port_name", dev);
 	f->dsa_user = path_exists(path);
 	f->dsa_present = dsa_present;
@@ -283,6 +303,23 @@ int om_ports_discover(struct om_port_entry out[], int max)
 		fill_facts(&out[n].f, names[i], &nf, dsa_present);
 		out[n].f.user_protected = list_has(prot, n_prot, names[i]);
 		n++;
+	}
+
+	/* pass 3: vlan parents (swconfig trunk): "eth0" with "eth0.1"
+	 * children carries ALL vlans -- never a wired-leg candidate */
+	for (i = 0; i < n; i++) {
+		size_t dl = strlen(out[i].f.device);
+		int j;
+
+		for (j = 0; j < n; j++) {
+			if (j == i)
+				continue;
+			if (!strncmp(out[j].f.device, out[i].f.device, dl) &&
+			    out[j].f.device[dl] == '.') {
+				out[i].f.is_vlan_parent = true;
+				break;
+			}
+		}
 	}
 
 	/* management counting needs carrier facts of physical lan members */
